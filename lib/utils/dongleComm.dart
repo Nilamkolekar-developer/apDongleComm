@@ -7,43 +7,123 @@ import 'package:ap_dongle_comm/utils/enums/protocol.dart';
 import 'package:ap_dongle_comm/utils/helper/crc16_ccitt_kermit.dart';
 import 'package:ap_dongle_comm/utils/helper/responseArrayDecoding.dart';
 import 'package:ap_dongle_comm/utils/model/responseArrayStatusModel.dart';
+import 'package:ap_dongle_comm/utils/model/sessionLogModel.dart';
 import 'package:convert/convert.dart';
+import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:synchronized/synchronized.dart';
 
 class DongleComm {
-  final CommController comm;
+   CommController? comm;
   bool isChannel;
   String? channelId;
+  List<SessionLogsModel> logs = []; // nullable, could be null
   final _lock = Lock();
-  DongleComm({required this.comm, required this.isChannel, this.channelId});
+  DongleComm({ this.comm,  required this.isChannel, this.channelId});
+
+  // Future<Uint8List?> securityAccess() async {
+  //   String command;
+
+  //   if (isChannel) {
+  //     command = '500A${channelId}47568AFE56214E238000FFC3';
+  //   } else {
+  //     command = '500C47568AFE56214E238000FFC3';
+  //   }
+
+  //   final bytes = comm!.hexToBytes(command);
+  //   final response = await comm!.sendCommand(bytes);
+  //   return response;
+  // }
 
   Future<Uint8List?> securityAccess() async {
-    String command;
+  String command;
 
-    if (isChannel) {
-      command = '500A${channelId}47568AFE56214E238000FFC3';
-    } else {
-      command = '500C47568AFE56214E238000FFC3';
-    }
-
-    final bytes = comm.hexToBytes(command);
-    final response = await comm.sendCommand(bytes);
-    return response;
+  if (isChannel) {
+    command = '500A${channelId}47568AFE56214E238000FFC3';
+  } else {
+    command = '500C47568AFE56214E238000FFC3';
   }
+  print("📤 Security Command String: $command");
+  final bytes = comm!.hexToBytes(command);
+
+  print("📤 Security Command Bytes Length: ${bytes.length}");
+  print("📤 Security Command HEX: ${bytes.map((e) => e.toRadixString(16).padLeft(2,'0')).join(' ')}");
+
+  print("➡️ Sending command to device...");
+  // Send the command
+  final response = await comm!.sendCommand(bytes);
+
+  // Debug: show response in FlutterToast
+  if (response != null) {
+    String hexResponse = response.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+    print("Security Access Response (hex): $hexResponse");
+
+    Fluttertoast.showToast(
+      msg: "Security Access Response: $hexResponse",
+      toastLength: Toast.LENGTH_LONG,
+      gravity: ToastGravity.BOTTOM,
+      backgroundColor: Colors.black87,
+      textColor: Colors.white,
+    );
+  } else {
+    print("Security Access Response is null");
+    Fluttertoast.showToast(
+      msg: "Security Access Response is null",
+      toastLength: Toast.LENGTH_LONG,
+      gravity: ToastGravity.BOTTOM,
+      backgroundColor: Colors.black87,
+      textColor: Colors.white,
+    );
+  }
+
+  return response;
+}
+ 
+
+  // Future<Uint8List?> getWifiMacId() async {
+  //   String command;
+
+  //   if (isChannel) {
+  //     command = "2001${channelId}21";
+  //   } else {
+  //     command = "200321";
+  //   }
+
+  //   Uint8List bytes = hexToBytes(command);
+  //    List<int> crc = Crc16CcittKermit.computeChecksumBytes([bytes[crcByteIndex]]);
+  //   return await comm!.sendCommand(bytes);
+  // }
 
   Future<Uint8List?> getWifiMacId() async {
-    String command;
+  try {
+    print("------Start_Get_Mac_Id------");
 
-    if (isChannel) {
-      command = "2001${channelId}21";
+    String commandHex;
+    int crcByteIndex;
+
+    if (isChannel!) {
+      commandHex = "2001${channelId}21";
+      crcByteIndex = 3;
     } else {
-      command = "200321";
+      commandHex = "200321";
+      crcByteIndex = 2;
     }
+    Uint8List commandBytes = hexToBytes(commandHex);
+    List<int> crcBytes = Crc16CcittKermit.computeChecksumBytes([commandBytes[crcByteIndex]]);
+    Uint8List fullCommand = Uint8List(commandBytes.length + crcBytes.length);
+    fullCommand.setRange(0, commandBytes.length, commandBytes);
+    fullCommand.setRange(commandBytes.length, fullCommand.length, crcBytes);
 
-    Uint8List bytes = hexToBytes(command);
-    return await comm.sendCommand(bytes);
+    print("[SENDING] ${bytesToHex(fullCommand)}");
+    final response = await comm!.sendCommand(fullCommand);
+    print("[RAW MAC RESPONSE] ${response != null ? bytesToHex(response) : 'null'}");
+
+    return response;
+  } catch (e) {
+    print("❌ [GetWifiMacId] ERROR: $e");
+    return null;
   }
+}
 
   Uint8List hexToBytes(String hex) {
     hex = hex.replaceAll(' ', '');
@@ -55,27 +135,62 @@ class DongleComm {
     return result;
   }
 
-  Future<Uint8List?> getFirmwareVersion() async {
-    try {
-      print('➡️ [GetFirmwareVersion] START');
-      String commandBase = isChannel ? "2001${channelId}14" : "200314";
-      Uint8List bytesCommand = hexToBytes(commandBase);
-      return await comm.sendCommand(bytesCommand);
-    } catch (e) {
-      print('❌ [GetFirmwareVersion] ERROR: $e');
-      return null;
+  // Future<Uint8List?> getFirmwareVersion() async {
+  //   try {
+  //     print('➡️ [GetFirmwareVersion] START');
+  //     String commandBase = isChannel! ? "2001${channelId}14" : "200314";
+  //      List<int> crc = Crc16CcittKermit.computeChecksumBytes(commandBase);
+  //     Uint8List bytesCommand = hexToBytes(commandBase);
+  //     return await comm!.sendCommand(bytesCommand);
+  //   } catch (e) {
+  //     print('❌ [GetFirmwareVersion] ERROR: $e');
+  //     return null;
+  //   }
+  // }
+Future<Uint8List?> getFirmwareVersion() async {
+  try {
+    print("------Dongle_GetFirmwareVersion------");
+
+    String command = "";
+    late Uint8List bytesCommand;
+    late List<int> crc;
+
+    if (isChannel!) {
+      command = "2001${channelId}14";
+
+      bytesCommand = hexToBytes(command);
+      crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[3]]);
+    } else {
+      command = "200314";
+      bytesCommand = hexToBytes(command);
+      crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[2]]);
     }
+    final builder = BytesBuilder();
+    builder.add(bytesCommand);
+    builder.add(crc);
+    Uint8List sendBytes = builder.toBytes();
+    print("[SENDING] ${bytesToHex(sendBytes)}");
+    final response = await comm!.sendCommand(sendBytes);
+
+    print("[RAW FW RESPONSE] ${response != null ? bytesToHex(response) : "null"}");
+
+    return response;
+  } catch (e) {
+    print("❌ Dongle_GetFirmwareVersion ERROR: $e");
+    return null;
   }
+}
+
 
   Future<Uint8List?> resetDongle() async {
     try {
       print("------ Inside Dongle_Reset ------");
 
-      String commandBase = isChannel ? "2001${channelId}01" : "200301";
+      String commandBase = isChannel! ? "2001${channelId}01" : "200301";
 
       Uint8List bytesCommand = hexToBytes(commandBase);
 
-      return await comm.sendCommand(bytesCommand);
+      return await comm!.sendCommand(bytesCommand);
     } catch (e) {
       print("❌ Reset Error: $e");
       return null;
@@ -85,14 +200,14 @@ class DongleComm {
   Future<Uint8List?> dongleGetProtocol() async {
     String command;
 
-    if (isChannel) {
+    if (isChannel!) {
       command = "2001${channelId}03";
     } else {
       command = "200303";
     }
 
     Uint8List bytes = hexToBytes(command);
-    return await comm.sendCommand(bytes);
+    return await comm!.sendCommand(bytes);
   }
 
   Future<Uint8List?> dongleSetProtocol(int protocolVersion) async {
@@ -104,7 +219,7 @@ class DongleComm {
     String commandBase;
     Uint8List bytesToHash;
 
-    if (isChannel) {
+    if (isChannel!) {
       commandBase = "2002${channelId}02$protoHex";
       Uint8List fullBytes = hexToBytes(commandBase);
       bytesToHash = Uint8List.fromList([fullBytes[3], fullBytes[4]]);
@@ -120,7 +235,7 @@ class DongleComm {
     builder.addByte(crcVal & 0xFF);
 
     Uint8List finalPacket = builder.toBytes();
-    return await comm.sendCommand(finalPacket);
+    return await comm!.sendCommand(finalPacket);
   }
 
   Future<Uint8List?> updateFirmware(String url) async {
@@ -141,7 +256,7 @@ class DongleComm {
           .join();
       Uint8List sendBytes = hexToBytes(commandBase + crcHex);
       print("[FW_UPDATE] Sending: ${bytesToHex(sendBytes)}");
-      var response = await comm.sendCommand(sendBytes);
+      var response = await comm!.sendCommand(sendBytes);
       return response;
     } catch (e) {
       print("Error in updateFirmware: $e");
@@ -149,9 +264,164 @@ class DongleComm {
     }
   }
 
+  // Future<ResponseArrayStatus> can2xTxRx(
+  //   int frameLength,
+  //   String txDataHex,
+  // ) async {
+  //   return await _lock.synchronized<ResponseArrayStatus>(() async {
+  //     try {
+  //       print("--- [canTxRx] Internal Process Started ---");
+
+
+  //       int dataLength = frameLength + 2;
+  //       String command = "";
+
+  //       // 1️⃣ Packet Construction
+  //       if (isChannel) {
+  //         int firstByte = 0x40 | ((frameLength >> 8) & 0x0F);
+  //         int secondByte = frameLength & 0xFF;
+  //         command =
+  //             firstByte.toRadixString(16).padLeft(2, '0') +
+  //             secondByte.toRadixString(16).padLeft(2, '0') +
+  //             channelId! +
+  //             txDataHex;
+      
+  //       } else {
+  //         int firstByte = 0x40 | ((dataLength >> 8) & 0x0F);
+  //         int secondByte = dataLength & 0xFF;
+  //         command =
+  //             firstByte.toRadixString(16).padLeft(2, '0') +
+  //             secondByte.toRadixString(16).padLeft(2, '0') +
+  //             txDataHex;
+  //       }
+
+  //       // Compute CRC16
+  //       Uint8List crcBytesInput = hexToBytes(txDataHex);
+  //       int crcValue = Crc16CcittKermit.computeChecksum(crcBytesInput);
+  //       String crcHex = crcValue
+  //           .toRadixString(16)
+  //           .padLeft(4, '0')
+  //           .toUpperCase();
+
+  //       Uint8List sendBytes = hexToBytes(command + crcHex);
+  //       print("[canTxRx] Built Packet: ${bytesToHex(sendBytes)}");
+
+  //       // 2️⃣ Transmit and Retry Logic
+  //       int noOfTimesSent = 0;
+  //       while (noOfTimesSent < 5) {
+  //         noOfTimesSent++;
+  //         print("[canTxRx] Attempt: $noOfTimesSent");
+
+  //         Uint8List? response = await comm!.sendCommand(sendBytes);
+
+  //         if (response == null || response.isEmpty) {
+  //           print("[canTxRx] Error: Null/Empty response. Retrying...");
+  //           await Future.delayed(Duration(milliseconds: 100));
+  //           continue;
+  //         }
+
+  //         print("[canTxRx] Raw Received: ${bytesToHex(response)}");
+
+  //         // 🔥 ALWAYS extract ECU packet
+  //         Uint8List? ecuOnly = extractEcuPacket(response);
+  //         if (ecuOnly != null) {
+  //           print("[canTxRx] ECU Extracted: ${bytesToHex(ecuOnly)}");
+  //           response = ecuOnly; // overwrite response
+  //         }
+
+  //         Uint8List? actualData;
+  //         String dataStatus;
+
+  //         // Initial Decode
+  //         if (isChannel!) {
+  //           (
+  //             actualData,
+  //             dataStatus,
+  //           ) = ResponseArrayDecoding.CheckResponseWithChannel(
+  //             response,
+  //             sendBytes,
+  //           );
+  //         } else {
+  //           ResponseArrayStatus decoded = ResponseArrayDecoding.checkResponse(
+  //             response,
+  //             sendBytes,
+  //           );
+
+  //           actualData = decoded.actualDataBytes;
+  //           dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+  //         }
+
+  //         // 4️⃣ Sequential Handshake Loop (for slower ECUs)
+  //         if (dataStatus == "READAGAIN") {
+  //           int readAttempts = 0;
+  //           while (dataStatus == "READAGAIN" && readAttempts < 5) {
+  //             readAttempts++;
+  //             print(
+  //               "[canTxRx] Handshake Attempt $readAttempts: Waiting for data...",
+  //             );
+
+  //             await Future.delayed(Duration(milliseconds: 50 * readAttempts));
+
+  //             Uint8List? extraData = await comm!.readData();
+  //             if (extraData == null || extraData.isEmpty) continue;
+
+  //             print("[canTxRx] ExtraData Received: ${bytesToHex(extraData)}");
+  //             if (isChannel!) {
+  //               (
+  //                 actualData,
+  //                 dataStatus,
+  //               ) = ResponseArrayDecoding.CheckResponseWithChannel(
+  //                 extraData,
+  //                 sendBytes,
+  //               );
+  //             } else {
+  //               ResponseArrayStatus decoded =
+  //                   ResponseArrayDecoding.checkResponse(response, sendBytes);
+
+  //               actualData = decoded.actualDataBytes;
+  //               dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+  //             }
+
+  //             if (dataStatus != "READAGAIN") {
+  //               return ResponseArrayStatus(
+  //                 ecuResponse: extraData,
+  //                 ecuResponseStatus: dataStatus,
+  //                 actualDataBytes: actualData,
+  //                 sentBytes: sendBytes,
+  //               );
+  //             }
+  //           }
+  //         }
+
+  //         if (dataStatus == "SENDAGAIN") {
+  //           await Future.delayed(Duration(milliseconds: 200));
+  //           continue;
+  //         }
+
+  //         // Standard Success Return
+  //         return ResponseArrayStatus(
+  //           ecuResponse: response,
+  //           ecuResponseStatus: dataStatus,
+  //           actualDataBytes: actualData,
+  //           sentBytes: sendBytes,
+  //         );
+  //       }
+
+  //       // Timeout after 5 attempts
+  //       return ResponseArrayStatus(
+  //         ecuResponseStatus: "DONGLEERROR_TIMEOUT",
+  //         sentBytes: sendBytes,
+  //       );
+  //     } catch (e) {
+  //       print("[canTxRx] EXCEPTION: $e");
+  //       return ResponseArrayStatus(ecuResponseStatus: "EXCEPTION: $e");
+  //     }
+  //   });
+  // }
+
   Future<ResponseArrayStatus> can2xTxRx(
-  int frameLength,
-  String txDataHex,
+    int frameLength,
+    String txDataHex,
 ) async {
   return await _lock.synchronized<ResponseArrayStatus>(() async {
     try {
@@ -161,19 +431,21 @@ class DongleComm {
       String command = "";
 
       // 1️⃣ Packet Construction
-      if (isChannel) {
+      if (isChannel!) {
         int firstByte = 0x40 | ((frameLength >> 8) & 0x0F);
         int secondByte = frameLength & 0xFF;
-        command = firstByte.toRadixString(16).padLeft(2, '0') +
-                  secondByte.toRadixString(16).padLeft(2, '0') +
-                  channelId! +
-                  txDataHex;
+        command =
+            firstByte.toRadixString(16).padLeft(2, '0') +
+            secondByte.toRadixString(16).padLeft(2, '0') +
+            channelId! +
+            txDataHex;
       } else {
         int firstByte = 0x40 | ((dataLength >> 8) & 0x0F);
         int secondByte = dataLength & 0xFF;
-        command = firstByte.toRadixString(16).padLeft(2, '0') +
-                  secondByte.toRadixString(16).padLeft(2, '0') +
-                  txDataHex;
+        command =
+            firstByte.toRadixString(16).padLeft(2, '0') +
+            secondByte.toRadixString(16).padLeft(2, '0') +
+            txDataHex;
       }
 
       // Compute CRC16
@@ -184,19 +456,32 @@ class DongleComm {
       Uint8List sendBytes = hexToBytes(command + crcHex);
       print("[canTxRx] Built Packet: ${bytesToHex(sendBytes)}");
 
+      String formattedTx = bytesToHex(sendBytes)
+          .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ')
+          .trim();
+      
+      // Using ?.add ensures that if logs is somehow still null, it won't crash
+      logs.add(SessionLogsModel(header: "Tx", message: formattedTx));
+
       // 2️⃣ Transmit and Retry Logic
       int noOfTimesSent = 0;
       while (noOfTimesSent < 5) {
         noOfTimesSent++;
         print("[canTxRx] Attempt: $noOfTimesSent");
 
-        Uint8List? response = await comm.sendCommand(sendBytes);
+        Uint8List? response = await comm!.sendCommand(sendBytes);
 
         if (response == null || response.isEmpty) {
           print("[canTxRx] Error: Null/Empty response. Retrying...");
           await Future.delayed(Duration(milliseconds: 100));
           continue;
         }
+
+        // // ✅ Add RX packet to session logs
+        // String formattedRx = bytesToHex(response)
+        //     .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ')
+        //     .trim();
+      // logs!.add(SessionLogsModel(header: "Rx", message: formattedRx));
 
         print("[canTxRx] Raw Received: ${bytesToHex(response)}");
 
@@ -211,19 +496,22 @@ class DongleComm {
         String dataStatus;
 
         // Initial Decode
-        if (isChannel) {
-          (actualData, dataStatus) = ResponseArrayDecoding.CheckResponseWithChannel(
+        if (isChannel!) {
+          (
+            actualData,
+            dataStatus,
+          ) = ResponseArrayDecoding.CheckResponseWithChannel(
             response,
             sendBytes,
           );
         } else {
           ResponseArrayStatus decoded = ResponseArrayDecoding.checkResponse(
-  response,
-  sendBytes,
-);
+            response,
+            sendBytes,
+          );
 
-actualData = decoded.actualDataBytes;
-dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+          actualData = decoded.actualDataBytes;
+          dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         }
 
         // 4️⃣ Sequential Handshake Loop (for slower ECUs)
@@ -231,27 +519,30 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
           int readAttempts = 0;
           while (dataStatus == "READAGAIN" && readAttempts < 5) {
             readAttempts++;
-            print("[canTxRx] Handshake Attempt $readAttempts: Waiting for data...");
+            print(
+              "[canTxRx] Handshake Attempt $readAttempts: Waiting for data...",
+            );
 
             await Future.delayed(Duration(milliseconds: 50 * readAttempts));
 
-            Uint8List? extraData = await comm.readData();
+            Uint8List? extraData = await comm!.readData();
             if (extraData == null || extraData.isEmpty) continue;
 
             print("[canTxRx] ExtraData Received: ${bytesToHex(extraData)}");
-            if (isChannel) {
-              (actualData, dataStatus) = ResponseArrayDecoding.CheckResponseWithChannel(
+            if (isChannel!) {
+              (
+                actualData,
+                dataStatus,
+              ) = ResponseArrayDecoding.CheckResponseWithChannel(
                 extraData,
                 sendBytes,
               );
             } else {
-              ResponseArrayStatus decoded = ResponseArrayDecoding.checkResponse(
-  response,
-  sendBytes,
-);
+              ResponseArrayStatus decoded =
+                  ResponseArrayDecoding.checkResponse(response, sendBytes);
 
-actualData = decoded.actualDataBytes;
-dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+              actualData = decoded.actualDataBytes;
+              dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
             }
 
             if (dataStatus != "READAGAIN") {
@@ -291,11 +582,18 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
   });
 }
 
-  String bytesToHex(Uint8List bytes) {
-    return bytes
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0').toUpperCase())
-        .join(' ');
-  }
+
+  
+String bytesToHex(Uint8List bytes) {
+  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('').toUpperCase();
+}
+
+
+  // String bytesToHex(Uint8List bytes) {
+  //   return bytes
+  //       .map((byte) => byte.toRadixString(16).padLeft(2, '0').toUpperCase())
+  //       .join(' ');
+  // }
 
   Uint8List? extractEcuPacket(Uint8List fullResponse) {
     for (int i = 0; i < fullResponse.length - 1; i++) {
@@ -359,15 +657,15 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     try {
       Uint8List sendBytes = await canSetHardRxHeaderMask(
         frameId,
-        isChannel,
+        isChannel!,
         channelId!,
       );
-      var response = await comm.sendCommand(sendBytes);
+      var response = await comm!.sendCommand(sendBytes);
 
       if (response == null) throw Exception("Response was null");
       Uint8List ecuResponseBytes = Uint8List.fromList(response);
 
-      var decoded = isChannel
+      var decoded = isChannel!
           ? ResponseArrayDecoding.checkResponseIVNwithChannel(
               ecuResponseBytes,
               sendBytes,
@@ -384,11 +682,9 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
       while (dataStatus == "READAGAIN") {
         print("Polling for data...");
-        var responseReadAgain = await comm.readData();
+        var responseReadAgain = await comm!.readData();
 
         if (responseReadAgain == null) break;
-
-
       }
 
       return ResponseArrayStatusivn(
@@ -449,7 +745,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
     // 2. Build Command and Select CRC Range
     if (is11Bit) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2003$channelId"
             "04$txHeader";
@@ -461,7 +757,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         crcInput = bytes.sublist(2, 5); // bytes[2], [3], [4]
       }
     } else if (is29Bit) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2005$channelId"
             "04$txHeader";
@@ -473,7 +769,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         crcInput = bytes.sublist(2, 7); // bytes[2] through [6]
       }
     } else if (isKWP) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2002$channelId"
             "04$txHeader";
@@ -495,7 +791,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .toUpperCase();
     // 4. Send
     Uint8List sendBytes = Uint8List.fromList(hex.decode(command + crcHex));
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<dynamic> canGetTxHeader() async {
@@ -504,7 +800,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> crcInput = [];
 
-    if (isChannel) {
+    if (isChannel!) {
       // Structure: 0x20 0x01 [ChannelId] 0x05
       command =
           "2001$channelId"
@@ -528,7 +824,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .toUpperCase();
 
     Uint8List sendBytes = Uint8List.fromList(hex.decode(command + crcHex));
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<dynamic> canSetRxHeaderMask(String rxhdrmsk) async {
@@ -572,7 +868,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
       Protocol.ISO14230_4KWP_FASTINIT_C0,
     ].contains(currentProtocol);
     if (is11Bit) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2003$channelId"
             "06$rxhdrmsk";
@@ -584,7 +880,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         crcInput = bytes.sublist(2, 5); // Equivalent to bytes[2], [3], [4]
       }
     } else if (is29Bit) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2005$channelId"
             "06$rxhdrmsk";
@@ -596,7 +892,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         crcInput = bytes.sublist(2, 7); // Equivalent to bytes[2] through [6]
       }
     } else if (isKWP) {
-      if (isChannel) {
+      if (isChannel!) {
         command =
             "2002$channelId"
             "06$rxhdrmsk";
@@ -615,7 +911,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
     Uint8List sendBytes = Uint8List.fromList(hex.decode(command + crcHex));
 
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<dynamic> canGetRxHeaderMask() async {
@@ -624,7 +920,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> crcInput = [];
 
-    if (isChannel) {
+    if (isChannel!) {
       command =
           "2001$channelId"
           "07";
@@ -640,7 +936,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
         .join('');
     Uint8List sendBytes = Uint8List.fromList(hex.decode(command + crcHex));
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetP1Min() async {
@@ -649,7 +945,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel) {
+    if (isChannel!) {
       command = "2001${channelId}0d";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -668,7 +964,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     Uint8List sendBytes = hexToBytes(command + crcHex);
 
     print("[CAN_GetP1Min] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canSetP2Max(String p2max) async {
@@ -677,7 +973,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel) {
+    if (isChannel!) {
       command = "2003${channelId}0e$p2max";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -695,7 +991,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_SetP2Max] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetP2Max() async {
@@ -704,7 +1000,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel) {
+    if (isChannel!) {
       command = "2001${channelId}0f";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -722,7 +1018,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_GetP2Max] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Uint8List txArray = Uint8List(0);
@@ -730,12 +1026,12 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
   Future<Uint8List?> canStartTP() async {
     print("------CAN_StartTP------");
-    if (comm.connectivity.value == Connectivity.usb ||
-        comm.connectivity.value == Connectivity.wiFi ||
-        comm.connectivity.value == Connectivity.ble) {
+    if (comm!.connectivity.value == Connectivity.usb ||
+        comm!.connectivity.value == Connectivity.wiFi ||
+        comm!.connectivity.value == Connectivity.ble) {
       String command = "";
       List<int> checksumBytes;
-      if (isChannel) {
+      if (isChannel!) {
         command = "2001${channelId}10";
         Uint8List bytesCommand = hexToBytes(command);
         checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -752,7 +1048,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join();
       Uint8List sendBytes = hexToBytes(command + crcHex);
-      return await comm.sendCommand(sendBytes);
+      return await comm!.sendCommand(sendBytes);
     } else {
       final Uint8List message = Uint8List(7);
       message[0] = (SubCommandId.setTesterPresent.value >> 8) & 0xFF;
@@ -764,19 +1060,19 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         message,
       );
       print("[CAN_StartTP] Sending RP1210 Command: ${bytesToHex(command)}");
-      return await comm.sendCommand(command);
+      return await comm!.sendCommand(command);
     }
   }
 
   Future<Uint8List?> canStopTP() async {
     print("------CAN_StopTP------");
-    final currentConn = comm.connectivity.value;
+    final currentConn = comm!.connectivity.value;
     if (currentConn == Connectivity.usb ||
         currentConn == Connectivity.wiFi ||
         currentConn == Connectivity.ble) {
       String command = "";
       List<int> checksumBytes;
-      if (isChannel) {
+      if (isChannel!) {
         command = "2001${channelId}11";
         Uint8List bytesCommand = hexToBytes(command);
         checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -792,7 +1088,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
       String crcHex = checksumBytes
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join();
-      return await comm.sendCommand(hexToBytes(command + crcHex));
+      return await comm!.sendCommand(hexToBytes(command + crcHex));
     } else {
       final Uint8List message = Uint8List(2);
       message[0] = (SubCommandId.stopTesterPresent.value >> 8) & 0xFF;
@@ -802,7 +1098,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         message,
       );
       print("[CAN_StopTP] Sending RP1210 Command: ${bytesToHex(rp1210Cmd)}");
-      return await comm.sendCommand(rp1210Cmd);
+      return await comm!.sendCommand(rp1210Cmd);
     }
   }
 
@@ -812,7 +1108,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel) {
+    if (isChannel!) {
       command = "2002${channelId}0c$commValue";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -833,14 +1129,14 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
     print("[SetTesterPresent] Sending: ${bytesToHex(sendBytes)}");
 
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canStartPadding(String paddingByte) async {
     print("------CAN_StartPadding------");
     String command = "";
     List<int> checksumBytes;
-    if (isChannel) {
+    if (isChannel!) {
       command = "2002${channelId}12$paddingByte";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -858,7 +1154,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_StartPadding] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canStopPadding() async {
@@ -866,7 +1162,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
     String command = "";
     List<int> checksumBytes;
-    if (isChannel) {
+    if (isChannel!) {
       command = "2001${channelId}13";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -884,7 +1180,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_StopPadding] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> wifiWriteSSID(String ssidHex) async {
@@ -892,7 +1188,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
     String command = "";
     Uint8List bytesCommand;
     Uint8List outArray;
-    if (isChannel) {
+    if (isChannel!) {
       int len = (ssidHex.length ~/ 2) + 3;
       String lenHex = len.toRadixString(16).padLeft(2, '0').toUpperCase();
       command = "20$lenHex$channelId" + "1601${ssidHex}00";
@@ -911,14 +1207,14 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[Wifi_WriteSSID] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> wifiWritePassword(String passwordHex) async {
     print("------Wifi_WritePassword------");
     String command = "";
     Uint8List outArray;
-    if (isChannel) {
+    if (isChannel!) {
       int len = (passwordHex.length ~/ 2) + 3;
       String lenHex = len.toRadixString(16).padLeft(2, '0').toUpperCase();
       command = "20$lenHex$channelId" + "1701${passwordHex}00";
@@ -937,7 +1233,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[Wifi_WritePW] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canTxData(String txDataHex) async {
@@ -952,7 +1248,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_TxData] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> setBlkSeqCntr(String blkLenHex) async {
@@ -967,7 +1263,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[SetBlkSeqCntr] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> getBlkSeqCntr() async {
@@ -982,7 +1278,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[GetBlkSeqCntr] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> setSepTime(String sepTimeHex) async {
@@ -997,7 +1293,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[SetSepTime] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> getSepTime() async {
@@ -1012,7 +1308,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[GetSepTime] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetDefaultSSID() async {
@@ -1027,7 +1323,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_GetDefaultSSID] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetDefaultPassword() async {
@@ -1042,7 +1338,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_GetDefaultPassword] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetUserSSID() async {
@@ -1057,7 +1353,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_GetUserSSID] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Future<Uint8List?> canGetUserPassword() async {
@@ -1072,7 +1368,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         .join();
     Uint8List sendBytes = hexToBytes(command + crcHex);
     print("[CAN_GetUserPassword] Sending: ${bytesToHex(sendBytes)}");
-    return await comm.sendCommand(sendBytes);
+    return await comm!.sendCommand(sendBytes);
   }
 
   Uint8List getRP1210Command(int dWCommandId, Uint8List message) {
@@ -1114,7 +1410,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         message,
       );
 
-      Uint8List? resp = await comm.sendCommand(command);
+      Uint8List? resp = await comm!.sendCommand(command);
 
       if (resp != null) {
         int status = _extractStatus(resp);
@@ -1134,7 +1430,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         Uint8List(0),
       );
 
-      Uint8List? resp = await comm.sendCommand(command);
+      Uint8List? resp = await comm!.sendCommand(command);
 
       if (resp != null && _extractStatus(resp) == 0) {
         return true;
@@ -1154,7 +1450,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         Uint8List(0),
       );
 
-      Uint8List? resp = await comm.sendCommand(command);
+      Uint8List? resp = await comm!.sendCommand(command);
 
       if (resp != null && resp.length > 14) {
         return ascii.decode(resp.sublist(14));
@@ -1224,7 +1520,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         "Full command to send: ${command.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
       );
 
-      Uint8List? resp = await comm.sendCommand(command);
+      Uint8List? resp = await comm!.sendCommand(command);
       print(
         "Response received: ${resp?.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
       );
@@ -1245,8 +1541,8 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
   }
 
   String getRP1210ProtocolString(String protocol) {
-    if (comm.connectivity == Connectivity.rp1210Usb ||
-        comm.connectivity == Connectivity.rp1210WiFi) {
+    if (comm!.connectivity == Connectivity.rp1210Usb ||
+        comm!.connectivity == Connectivity.rp1210WiFi) {
       String rp;
 
       if (protocol.contains("250")) {
@@ -1261,8 +1557,8 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
       return rp;
     }
 
-    if (comm.connectivity == Connectivity.canFdUsb ||
-        comm.connectivity == Connectivity.canFdWiFi) {
+    if (comm!.connectivity == Connectivity.canFdUsb ||
+        comm!.connectivity == Connectivity.canFdWiFi) {
       String rp;
 
       if (protocol.contains("250")) {
@@ -1277,8 +1573,8 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
       return rp;
     }
 
-    if (comm.connectivity == Connectivity.doipUsb ||
-        comm.connectivity == Connectivity.doipWiFi) {
+    if (comm!.connectivity == Connectivity.doipUsb ||
+        comm!.connectivity == Connectivity.doipWiFi) {
       return "ISO 13400-2:2012";
     }
 
@@ -1423,186 +1719,224 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
   // }
 
   Future<ResponseArrayStatus> canRP1210TxRx(
-  int frameLength,
-  String txData,
-) async {
-  return await _lock.synchronized(() async {
-    try {
-      print("------ ENTER CAN_TxRx ------");
-      Fluttertoast.showToast(msg: "Starting CAN TxRx...");
+    int frameLength,
+    String txData,
+  ) async {
+    return await _lock.synchronized(() async {
+      try {
+        print("------ ENTER CAN_TxRx ------");
+        Fluttertoast.showToast(msg: "Starting CAN TxRx...");
 
-      final conn = comm.connectivity.value;
-      Uint8List diagnosticPayload = hexToBytes(txData);
+        final conn = comm!.connectivity.value;
+        Uint8List diagnosticPayload = hexToBytes(txData);
 
-      // --- Packet Preparation ---
-      int dataLength = frameLength;
-      String headerStr;
+        // --- Packet Preparation ---
+        int dataLength = frameLength;
+        String headerStr;
 
-      if (isChannel == true) {
-        if (channelId == null || channelId!.isEmpty) {
-          print("⚠ Channel mode active but channelId not set.");
-          return ResponseArrayStatus(ecuResponseStatus: "Channel ID Not Set");
-        }
-        headerStr =
-            (0x40 | ((frameLength >> 8) & 0x0f))
-                .toRadixString(16)
-                .padLeft(2, '0') +
-            (frameLength & 0xff).toRadixString(16).padLeft(2, '0') +
-            channelId! +
-            txData;
-      } else {
-        headerStr =
-            (0x40 | ((dataLength >> 8) & 0x0f))
-                .toRadixString(16)
-                .padLeft(2, '0') +
-            (dataLength & 0xff).toRadixString(16).padLeft(2, '0') +
-            txData;
-      }
-
-      // --- Compute CRC ---
-      List<int> checksum = Crc16CcittKermit.computeChecksumBytes(diagnosticPayload);
-      String crcHex = checksum.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-      Uint8List standardFullPacket = hexToBytes(headerStr + crcHex);
-
-      int noOfTimesSent = 0;
-      ResponseArrayStatus? responseStructure;
-      Rp1210SendResult? rpResult;
-
-      while (noOfTimesSent < 5) {
-        noOfTimesSent++;
-        Fluttertoast.showToast(msg: "Sending packet attempt $noOfTimesSent");
-
-        dynamic response;
-
-        // --- Transmission ---
-        if (conn == Connectivity.rp1210WiFi || conn == Connectivity.rp1210Usb) {
-          rpResult = await rp1210SendMessage(diagnosticPayload);
-          response = rpResult?.response;
-          if (rpResult != null) {
-            print("[SENDING FULL PACKET] ${formatHex(rpResult.sentPacket)}");
-            Fluttertoast.showToast(msg: "Packet sent via RP1210");
+        if (isChannel == true) {
+          if (channelId == null || channelId!.isEmpty) {
+            print("⚠ Channel mode active but channelId not set.");
+            return ResponseArrayStatus(ecuResponseStatus: "Channel ID Not Set");
           }
+          headerStr =
+              (0x40 | ((frameLength >> 8) & 0x0f))
+                  .toRadixString(16)
+                  .padLeft(2, '0') +
+              (frameLength & 0xff).toRadixString(16).padLeft(2, '0') +
+              channelId! +
+              txData;
         } else {
-          print("[SENDING FULL PACKET] ${formatHex(standardFullPacket)}");
-          Fluttertoast.showToast(msg: "Packet sent via standard comm");
-          response = await comm.sendCommand(standardFullPacket);
+          headerStr =
+              (0x40 | ((dataLength >> 8) & 0x0f))
+                  .toRadixString(16)
+                  .padLeft(2, '0') +
+              (dataLength & 0xff).toRadixString(16).padLeft(2, '0') +
+              txData;
         }
 
-        if (response == null) {
-          Fluttertoast.showToast(msg: "No response from dongle");
+        // --- Compute CRC ---
+        List<int> checksum = Crc16CcittKermit.computeChecksumBytes(
+          diagnosticPayload,
+        );
+        String crcHex = checksum
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
+        Uint8List standardFullPacket = hexToBytes(headerStr + crcHex);
+
+        int noOfTimesSent = 0;
+        ResponseArrayStatus? responseStructure;
+        Rp1210SendResult? rpResult;
+
+        while (noOfTimesSent < 5) {
+          noOfTimesSent++;
+          Fluttertoast.showToast(msg: "Sending packet attempt $noOfTimesSent");
+
+          dynamic response;
+
+          // --- Transmission ---
+          if (conn == Connectivity.rp1210WiFi ||
+              conn == Connectivity.rp1210Usb) {
+            rpResult = await rp1210SendMessage(diagnosticPayload);
+            response = rpResult?.response;
+            if (rpResult != null) {
+              print("[SENDING FULL PACKET] ${formatHex(rpResult.sentPacket)}");
+              Fluttertoast.showToast(msg: "Packet sent via RP1210");
+            }
+          } else {
+            print("[SENDING FULL PACKET] ${formatHex(standardFullPacket)}");
+            Fluttertoast.showToast(msg: "Packet sent via standard comm");
+            response = await comm!.sendCommand(standardFullPacket);
+          }
+
+          if (response == null) {
+            Fluttertoast.showToast(msg: "No response from dongle");
+            responseStructure = ResponseArrayStatus(
+              ecuResponseStatus: "No Resp From Dongle",
+            );
+            break;
+          }
+
+          Uint8List rawRxBytes = response as Uint8List;
+          Uint8List? secondaryPacket;
+
+          // --- Multi-Packet Handling ---
+          if (conn == Connectivity.rp1210WiFi ||
+              conn == Connectivity.rp1210Usb) {
+            if (rawRxBytes.length > 4) {
+              int firstPacketLen =
+                  (rawRxBytes[0] << 24) |
+                  (rawRxBytes[1] << 16) |
+                  (rawRxBytes[2] << 8) |
+                  rawRxBytes[3];
+
+              if (rawRxBytes.length > firstPacketLen) {
+                Fluttertoast.showToast(msg: "Multi-packet response detected");
+                secondaryPacket = rawRxBytes.sublist(firstPacketLen);
+                rawRxBytes = rawRxBytes.sublist(0, firstPacketLen);
+              }
+            }
+          }
+
+          ResponseArrayStatus result =
+              (conn == Connectivity.rp1210WiFi ||
+                  conn == Connectivity.rp1210Usb)
+              ? ResponseArrayDecoding.checkResponseRP12101(
+                  rawRxBytes,
+                  diagnosticPayload,
+                )
+              : isChannel!
+              ? ResponseArrayDecoding.CheckResponseWithChannel(
+                      rawRxBytes,
+                      standardFullPacket,
+                    )
+                    as ResponseArrayStatus
+              : ResponseArrayDecoding.checkResponse(
+                  rawRxBytes,
+                  standardFullPacket,
+                );
+
+          Uint8List actualData = result.actualDataBytes ?? Uint8List(0);
+          String dataStatus = result.ecuResponseStatus ?? "UNKNOWN";
+
+          // --- Resend if needed ---
+          if (dataStatus == "SENDAGAIN") {
+            Fluttertoast.showToast(msg: "Resending packet...");
+            continue;
+          }
+
+          // --- Read Again / Multi-Packet ---
+          if (dataStatus == "READAGAIN") {
+            Fluttertoast.showToast(msg: "Reading again from ECU...");
+            if (actualData.isNotEmpty &&
+                actualData[0] == 0x7F &&
+                actualData.length >= 3 &&
+                actualData[2] != 0x78) {
+              dataStatus = ResponseArrayDecoding.getEcuErrorStatusRP1210(
+                actualData[2],
+              );
+              Fluttertoast.showToast(msg: "ECU Error: $dataStatus");
+            } else if (secondaryPacket != null) {
+              Fluttertoast.showToast(
+                msg: "Processing buffered secondary packet",
+              );
+              var readResult = ResponseArrayDecoding.checkResponseRP12101(
+                secondaryPacket,
+                diagnosticPayload,
+              );
+              dataStatus = readResult.ecuResponseStatus ?? "UNKNOWN";
+              actualData = readResult.actualDataBytes ?? Uint8List(0);
+              rawRxBytes = secondaryPacket;
+            } else {
+              while (dataStatus == "READAGAIN") {
+                var readAgainResp = await comm!.readData();
+                if (readAgainResp == null) {
+                  Fluttertoast.showToast(
+                    msg: "No response from dongle during read again",
+                  );
+                  dataStatus = "No Resp From Dongle";
+                  break;
+                }
+
+                var readResult =
+                    (conn == Connectivity.rp1210WiFi ||
+                        conn == Connectivity.rp1210Usb)
+                    ? ResponseArrayDecoding.checkResponseRP12101(
+                        readAgainResp,
+                        diagnosticPayload,
+                      )
+                    : ResponseArrayDecoding.checkResponse(
+                        readAgainResp,
+                        standardFullPacket,
+                      );
+
+                dataStatus = readResult.ecuResponseStatus ?? "UNKNOWN";
+                actualData = readResult.actualDataBytes ?? Uint8List(0);
+                rawRxBytes = readAgainResp;
+
+                if (actualData.isNotEmpty &&
+                    actualData[0] == 0x7F &&
+                    actualData.length >= 3 &&
+                    actualData[2] != 0x78) {
+                  dataStatus = ResponseArrayDecoding.getEcuErrorStatusRP1210(
+                    actualData[2],
+                  );
+                  Fluttertoast.showToast(msg: "ECU Error: $dataStatus");
+                  break;
+                }
+              }
+            }
+          }
+
+          // --- Construct response object ---
           responseStructure = ResponseArrayStatus(
-            ecuResponseStatus: "No Resp From Dongle",
+            ecuResponse: rawRxBytes,
+            ecuResponseStatus: dataStatus,
+            actualDataBytes: actualData,
+            sentBytes:
+                (conn == Connectivity.rp1210WiFi ||
+                    conn == Connectivity.rp1210Usb)
+                ? rpResult?.sentPacket
+                : standardFullPacket,
           );
+
+          Fluttertoast.showToast(msg: "Response received: $dataStatus");
+          print("actualData: $actualData");
           break;
         }
 
-        Uint8List rawRxBytes = response as Uint8List;
-        Uint8List? secondaryPacket;
-
-        // --- Multi-Packet Handling ---
-        if (conn == Connectivity.rp1210WiFi || conn == Connectivity.rp1210Usb) {
-          if (rawRxBytes.length > 4) {
-            int firstPacketLen =
-                (rawRxBytes[0] << 24) |
-                (rawRxBytes[1] << 16) |
-                (rawRxBytes[2] << 8) |
-                rawRxBytes[3];
-
-            if (rawRxBytes.length > firstPacketLen) {
-              Fluttertoast.showToast(msg: "Multi-packet response detected");
-              secondaryPacket = rawRxBytes.sublist(firstPacketLen);
-              rawRxBytes = rawRxBytes.sublist(0, firstPacketLen);
-            }
-          }
-        }
-
-     ResponseArrayStatus result =
-    (conn == Connectivity.rp1210WiFi || conn == Connectivity.rp1210Usb)
-        ? ResponseArrayDecoding.checkResponseRP12101(rawRxBytes, diagnosticPayload)
-        : isChannel
-            ? ResponseArrayDecoding.CheckResponseWithChannel(rawRxBytes, standardFullPacket) as ResponseArrayStatus
-            : ResponseArrayDecoding.checkResponse(rawRxBytes, standardFullPacket);
-
-        Uint8List actualData = result.actualDataBytes ?? Uint8List(0);
-        String dataStatus = result.ecuResponseStatus ?? "UNKNOWN";
-
-        // --- Resend if needed ---
-        if (dataStatus == "SENDAGAIN") {
-          Fluttertoast.showToast(msg: "Resending packet...");
-          continue;
-        }
-
-        // --- Read Again / Multi-Packet ---
-        if (dataStatus == "READAGAIN") {
-          Fluttertoast.showToast(msg: "Reading again from ECU...");
-          if (actualData.isNotEmpty &&
-              actualData[0] == 0x7F &&
-              actualData.length >= 3 &&
-              actualData[2] != 0x78) {
-            dataStatus = ResponseArrayDecoding.getEcuErrorStatusRP1210(actualData[2]);
-            Fluttertoast.showToast(msg: "ECU Error: $dataStatus");
-          } else if (secondaryPacket != null) {
-            Fluttertoast.showToast(msg: "Processing buffered secondary packet");
-            var readResult = ResponseArrayDecoding.checkResponseRP12101(secondaryPacket, diagnosticPayload);
-            dataStatus = readResult.ecuResponseStatus ?? "UNKNOWN";
-            actualData = readResult.actualDataBytes ?? Uint8List(0);
-            rawRxBytes = secondaryPacket;
-          } else {
-            while (dataStatus == "READAGAIN") {
-              var readAgainResp = await comm.readData();
-              if (readAgainResp == null) {
-                Fluttertoast.showToast(msg: "No response from dongle during read again");
-                dataStatus = "No Resp From Dongle";
-                break;
-              }
-
-              var readResult =
-                  (conn == Connectivity.rp1210WiFi || conn == Connectivity.rp1210Usb)
-                      ? ResponseArrayDecoding.checkResponseRP12101(readAgainResp, diagnosticPayload)
-                      : ResponseArrayDecoding.checkResponse(readAgainResp, standardFullPacket);
-
-              dataStatus = readResult.ecuResponseStatus ?? "UNKNOWN";
-              actualData = readResult.actualDataBytes ?? Uint8List(0);
-              rawRxBytes = readAgainResp;
-
-              if (actualData.isNotEmpty &&
-                  actualData[0] == 0x7F &&
-                  actualData.length >= 3 &&
-                  actualData[2] != 0x78) {
-                dataStatus = ResponseArrayDecoding.getEcuErrorStatusRP1210(actualData[2]);
-                Fluttertoast.showToast(msg: "ECU Error: $dataStatus");
-                break;
-              }
-            }
-          }
-        }
-
-        // --- Construct response object ---
-        responseStructure = ResponseArrayStatus(
-          ecuResponse: rawRxBytes,
-          ecuResponseStatus: dataStatus,
-          actualDataBytes: actualData,
-          sentBytes: (conn == Connectivity.rp1210WiFi || conn == Connectivity.rp1210Usb)
-              ? rpResult?.sentPacket
-              : standardFullPacket,
-        );
-
-        Fluttertoast.showToast(msg: "Response received: $dataStatus");
-        print("actualData: $actualData");
-        break;
+        return responseStructure ??
+            ResponseArrayStatus(ecuResponseStatus: "Unknown Error");
+      } catch (e) {
+        Fluttertoast.showToast(msg: "Exception: $e");
+        print("[EXCEPTION] canRP1210TxRx: $e");
+        return ResponseArrayStatus(ecuResponseStatus: e.toString());
+      } finally {
+        print("------ EXIT CAN_TxRx ------");
+        Fluttertoast.showToast(msg: "Exiting CAN TxRx");
       }
-
-      return responseStructure ?? ResponseArrayStatus(ecuResponseStatus: "Unknown Error");
-    } catch (e) {
-      Fluttertoast.showToast(msg: "Exception: $e");
-      print("[EXCEPTION] canRP1210TxRx: $e");
-      return ResponseArrayStatus(ecuResponseStatus: e.toString());
-    } finally {
-      print("------ EXIT CAN_TxRx ------");
-      Fluttertoast.showToast(msg: "Exiting CAN TxRx");
-    }
-  });
-}
+    });
+  }
 
   // Utility to make logs clean
   String formatHex(Uint8List data) {
@@ -1616,11 +1950,11 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
 
       Uint8List message;
       bool isStandardRP =
-          (comm.connectivity.value == Connectivity.rp1210Usb ||
-          comm.connectivity.value == Connectivity.rp1210WiFi);
+          (comm!.connectivity.value == Connectivity.rp1210Usb ||
+          comm!.connectivity.value == Connectivity.rp1210WiFi);
 
-      print("[DEBUG] Connectivity: ${comm.connectivity.value}");
-      Fluttertoast.showToast(msg: "Connectivity: ${comm.connectivity.value}");
+      print("[DEBUG] Connectivity: ${comm!.connectivity.value}");
+      Fluttertoast.showToast(msg: "Connectivity: ${comm!.connectivity.value}");
 
       print("[DEBUG] TX Array (CAN ID): ${formatHex(txArray)}");
       print("[DEBUG] UDS Payload: ${formatHex(payload)}");
@@ -1664,7 +1998,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         "[DEBUG] Message Length Header: ${command.sublist(0, 4).map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
       );
 
-      final response = await comm.sendCommand(command);
+      final response = await comm!.sendCommand(command);
 
       if (response != null) {
         print(
@@ -1705,7 +2039,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         DWCommandId.sendCommand.value,
         message,
       );
-      var resp = await comm.sendCommand(command);
+      var resp = await comm!.sendCommand(command);
       if (resp != null && resp.isNotEmpty && resp.every((byte) => byte == 0)) {
         retStatus = true;
       }
@@ -1728,7 +2062,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         DWCommandId.sendCommand.value,
         message,
       );
-      var resp = await comm.sendCommand(command);
+      var resp = await comm!.sendCommand(command);
       if (resp != null && resp.isNotEmpty && resp.every((byte) => byte == 0)) {
         retStatus = true;
       }
@@ -1772,7 +2106,7 @@ dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
         DWCommandId.doipSendMessage.value,
         message,
       );
-      return await comm.sendCommand(command);
+      return await comm!.sendCommand(command);
     } catch (e) {
       print("Error in RP1210DoipSendMessage: $e");
       return null;

@@ -18,6 +18,7 @@ import 'package:usb_serial/usb_serial.dart';
 
 class CommController extends GetxController {
   var connectivity = Connectivity.none.obs;
+    SerialPort? serialPort;
    late DongleComm? dongleComm;
   var isConnected = false.obs;
 UsbPort? _usbPort;
@@ -34,7 +35,15 @@ UsbPort? _usbPort;
   Stream<Uint8List> get responses => _responseStream.stream;
   Stream<bool> get connectionUpdates => _connectionStream.stream;
   StreamSubscription? sub;
-
+void initializeUSBComm(dynamic arg1, dynamic arg2) {
+  // 'as?' is the safe cast in Dart, similar to 'as' in C#
+  // It will set serialPort to null if arg1 is not a UsbPort
+  if (arg1 is UsbPort) {
+    _usbPort = arg1;
+  } else {
+    print("Initialization failed: arg1 is not a UsbPort");
+  }
+}
   Future<void> connectWifi({
   required String host,
   required int port,
@@ -71,7 +80,7 @@ UsbPort? _usbPort;
     );
     Future.delayed(const Duration(milliseconds: 500), () async {
       print('Auto-initializing Dongle Protocol...');
-      //await dongleComm!.dongleSetProtocol(protocolVersion: 02);
+      
     });
   } on SocketException catch (e) {
     print('SocketException: $e');
@@ -197,13 +206,28 @@ Future<void> disconnectVCI() async {
   }
 }
 
-Uint8List wrapPacket(Uint8List payload, int headerByte, {int? channel}) {
+Uint8List wrapPacket1(Uint8List payload, int headerByte, {int? channel}) {
   final builder = BytesBuilder();
   builder.addByte(headerByte);
   builder.addByte(payload.length);
   builder.addByte(channel!);
   builder.add(payload);
   List<int> crc = Crc16CcittKermit.computeChecksumBytes(payload);
+  builder.add(crc);
+  return builder.toBytes();
+}
+Uint8List wrapPacket(Uint8List payload, int headerByte, {int? channel}) {
+  final builder = BytesBuilder();
+
+  builder.addByte(headerByte);        // header
+  builder.addByte(payload.length);    // length
+  builder.addByte(channel!);          // channel
+  builder.add(payload);               // payload
+
+  // Compute CRC over entire packet so far (header + length + channel + payload)
+  Uint8List packetSoFar = builder.toBytes();
+  List<int> crc = Crc16CcittKermit.computeChecksumBytes(packetSoFar);
+
   builder.add(crc);
   return builder.toBytes();
 }
@@ -222,8 +246,22 @@ Future<Uint8List?> sendCommand(Uint8List finalPacket, {Duration timeout = const 
   final List<int> responseBuffer = []; 
 
 
+  // sub = responses.listen((data) {
+  //   responseBuffer.addAll(data);
+  // });
   sub = responses.listen((data) {
     responseBuffer.addAll(data);
+    
+    // logic: If we have received data, we might be done.
+    // In many serial protocols, we complete once the buffer isn't empty.
+    if (responseBuffer.isNotEmpty && !completer.isCompleted) {
+      // Small delay to ensure all chunks of the packet arrived
+      Future.delayed(Duration(milliseconds: 100), () {
+        if (!completer.isCompleted) {
+          completer.complete(Uint8List.fromList(responseBuffer));
+        }
+      });
+    }
   });
 
   try {
@@ -269,6 +307,82 @@ Future<Uint8List?> sendCommand(Uint8List finalPacket, {Duration timeout = const 
     await sub!.cancel();
   }
 }
+
+// Future<Uint8List?> sendCommand(Uint8List finalPacket, {Duration timeout = const Duration(seconds: 5)}) async {
+//   if (!isConnected.value) {
+//     print("❌ [SENDING] Aborted: Not connected.");
+//     return null;
+//   }
+
+//   final Completer<Uint8List> completer = Completer();
+//   final List<int> responseBuffer = []; 
+
+//   print("📡 [LISTENER] Setting up response listener...");
+  
+//   sub = responses.listen((data) {
+//     responseBuffer.addAll(data);
+//     print("📥 [DATA RECEIVED] Chunk: ${bytesToHex(Uint8List.fromList(data))} | Total Buffer: ${bytesToHex(Uint8List.fromList(responseBuffer))}");
+    
+//     if (responseBuffer.isNotEmpty && !completer.isCompleted) {
+//       // Debounce logic: wait 100ms for more chunks before completing
+//       print("⏳ [DEBOUNCE] Starting 100ms wait for additional data...");
+//       Future.delayed(Duration(milliseconds: 100), () {
+//         if (!completer.isCompleted) {
+//           print("✅ [COMPLETER] Finalizing response with ${responseBuffer.length} bytes.");
+//           completer.complete(Uint8List.fromList(responseBuffer));
+//         }
+//       });
+//     }
+//   });
+
+//   try {
+//     print("[SENDING] ${bytesToHex(finalPacket)}");
+//      if ([
+//       Connectivity.wiFi, 
+//       Connectivity.rp1210WiFi, 
+//       Connectivity.canFdWiFi, 
+//       Connectivity.doipWiFi
+//     ].contains(connectivity.value) && _socket != null) {
+      
+//       _socket!.add(finalPacket);
+//       await _socket!.flush(); 
+//     } 
+//     if ([Connectivity.usb, Connectivity.rp1210Usb, Connectivity.canFdUsb, Connectivity.doipUsb].contains(connectivity.value)) {
+//       if (_usbPort != null) {
+//         print("🔌 [USB] Writing to _usbPort...");
+//         await _usbPort!.write(finalPacket);
+//       } else if (_desktopPort != null) {
+//         print("💻 [DESKTOP] Writing to _desktopPort...");
+//         _desktopPort!.write(finalPacket);
+//       } else {
+//         throw Exception("No USB or Desktop Port available");
+//       }
+//     } 
+//     // Add socket logic here if needed...
+
+//     print("🕒 [WAITING] Waiting for future to complete (Timeout: ${timeout.inSeconds}s)...");
+//     return await completer.future.timeout(timeout);
+
+//   } catch (e) {
+//     if (e is TimeoutException) {
+//       print("⏰ [TIMEOUT] No response within ${timeout.inSeconds}s.");
+//     } else {
+//       print("🔥 [EXCEPTION] Error in sendCommand: $e");
+//     }
+
+//     if (responseBuffer.isNotEmpty) {
+//       final received = Uint8List.fromList(responseBuffer);
+//       print("♻️ [RECOVERY] Returning partial buffer: ${bytesToHex(received)}");
+//       return received;
+//     }
+
+//     print("🚫 [FAILED] No data in buffer to return.");
+//     return null; // Better than returning a String as Uint8List
+//   } finally {
+//     print("🧹 [CLEANUP] Cancelling listener subscription.");
+//     await sub?.cancel();
+//   }
+// }
 
 
 
