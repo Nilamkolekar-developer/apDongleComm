@@ -14,12 +14,12 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:synchronized/synchronized.dart';
 
 class DongleComm {
-   CommController? comm;
+  CommController? comm;
   bool isChannel;
   String? channelId;
   List<SessionLogsModel> logs = []; // nullable, could be null
   final _lock = Lock();
-  DongleComm({ this.comm,  required this.isChannel, this.channelId});
+  DongleComm({this.comm, required this.isChannel, this.channelId});
 
   // Future<Uint8List?> securityAccess() async {
   //   String command;
@@ -36,49 +36,52 @@ class DongleComm {
   // }
 
   Future<Uint8List?> securityAccess() async {
-  String command;
+    String command;
 
-  if (isChannel) {
-    command = '500A${channelId}47568AFE56214E238000FFC3';
-  } else {
-    command = '500C47568AFE56214E238000FFC3';
-  }
-  print("📤 Security Command String: $command");
-  final bytes = comm!.hexToBytes(command);
+    if (isChannel) {
+      command = '500A${channelId}47568AFE56214E238000FFC3';
+    } else {
+      command = '500C47568AFE56214E238000FFC3';
+    }
+    print("📤 Security Command String: $command");
+    final bytes = comm!.hexToBytes(command);
 
-  print("📤 Security Command Bytes Length: ${bytes.length}");
-  print("📤 Security Command HEX: ${bytes.map((e) => e.toRadixString(16).padLeft(2,'0')).join(' ')}");
-
-  print("➡️ Sending command to device...");
-  // Send the command
-  final response = await comm!.sendCommand(bytes);
-
-  // Debug: show response in FlutterToast
-  if (response != null) {
-    String hexResponse = response.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-    print("Security Access Response (hex): $hexResponse");
-
-    Fluttertoast.showToast(
-      msg: "Security Access Response: $hexResponse",
-      toastLength: Toast.LENGTH_LONG,
-      gravity: ToastGravity.BOTTOM,
-      backgroundColor: Colors.black87,
-      textColor: Colors.white,
+    print("📤 Security Command Bytes Length: ${bytes.length}");
+    print(
+      "📤 Security Command HEX: ${bytes.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ')}",
     );
-  } else {
-    print("Security Access Response is null");
-    Fluttertoast.showToast(
-      msg: "Security Access Response is null",
-      toastLength: Toast.LENGTH_LONG,
-      gravity: ToastGravity.BOTTOM,
-      backgroundColor: Colors.black87,
-      textColor: Colors.white,
-    );
-  }
 
-  return response;
-}
- 
+    print("➡️ Sending command to device...");
+    // Send the command
+    final response = await comm!.sendCommand(bytes);
+
+    // Debug: show response in FlutterToast
+    if (response != null) {
+      String hexResponse = response
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join(' ');
+      print("Security Access Response (hex): $hexResponse");
+
+      Fluttertoast.showToast(
+        msg: "Security Access Response: $hexResponse",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.black87,
+        textColor: Colors.white,
+      );
+    } else {
+      print("Security Access Response is null");
+      Fluttertoast.showToast(
+        msg: "Security Access Response is null",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.black87,
+        textColor: Colors.white,
+      );
+    }
+
+    return response;
+  }
 
   // Future<Uint8List?> getWifiMacId() async {
   //   String command;
@@ -95,35 +98,39 @@ class DongleComm {
   // }
 
   Future<Uint8List?> getWifiMacId() async {
-  try {
-    print("------Start_Get_Mac_Id------");
+    try {
+      print("------Start_Get_Mac_Id------");
 
-    String commandHex;
-    int crcByteIndex;
+      String commandHex;
+      int crcByteIndex;
 
-    if (isChannel!) {
-      commandHex = "2001${channelId}21";
-      crcByteIndex = 3;
-    } else {
-      commandHex = "200321";
-      crcByteIndex = 2;
+      if (isChannel) {
+        commandHex = "2001${channelId}21";
+        crcByteIndex = 3;
+      } else {
+        commandHex = "200321";
+        crcByteIndex = 2;
+      }
+      Uint8List commandBytes = hexToBytes(commandHex);
+      List<int> crcBytes = Crc16CcittKermit.computeChecksumBytes([
+        commandBytes[crcByteIndex],
+      ]);
+      Uint8List fullCommand = Uint8List(commandBytes.length + crcBytes.length);
+      fullCommand.setRange(0, commandBytes.length, commandBytes);
+      fullCommand.setRange(commandBytes.length, fullCommand.length, crcBytes);
+
+      print("[SENDING] ${bytesToHex(fullCommand)}");
+      final response = await comm!.sendCommand(fullCommand);
+      print(
+        "[RAW MAC RESPONSE] ${response != null ? bytesToHex(response) : 'null'}",
+      );
+
+      return response;
+    } catch (e) {
+      print("❌ [GetWifiMacId] ERROR: $e");
+      return null;
     }
-    Uint8List commandBytes = hexToBytes(commandHex);
-    List<int> crcBytes = Crc16CcittKermit.computeChecksumBytes([commandBytes[crcByteIndex]]);
-    Uint8List fullCommand = Uint8List(commandBytes.length + crcBytes.length);
-    fullCommand.setRange(0, commandBytes.length, commandBytes);
-    fullCommand.setRange(commandBytes.length, fullCommand.length, crcBytes);
-
-    print("[SENDING] ${bytesToHex(fullCommand)}");
-    final response = await comm!.sendCommand(fullCommand);
-    print("[RAW MAC RESPONSE] ${response != null ? bytesToHex(response) : 'null'}");
-
-    return response;
-  } catch (e) {
-    print("❌ [GetWifiMacId] ERROR: $e");
-    return null;
   }
-}
 
   Uint8List hexToBytes(String hex) {
     hex = hex.replaceAll(' ', '');
@@ -147,46 +154,47 @@ class DongleComm {
   //     return null;
   //   }
   // }
-Future<Uint8List?> getFirmwareVersion() async {
-  try {
-    print("------Dongle_GetFirmwareVersion------");
+  Future<Uint8List?> getFirmwareVersion() async {
+    try {
+      print("------Dongle_GetFirmwareVersion------");
 
-    String command = "";
-    late Uint8List bytesCommand;
-    late List<int> crc;
+      String command = "";
+      late Uint8List bytesCommand;
+      late List<int> crc;
 
-    if (isChannel!) {
-      command = "2001${channelId}14";
+      if (isChannel) {
+        command = "2001${channelId}14";
 
-      bytesCommand = hexToBytes(command);
-      crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[3]]);
-    } else {
-      command = "200314";
-      bytesCommand = hexToBytes(command);
-      crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[2]]);
+        bytesCommand = hexToBytes(command);
+        crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[3]]);
+      } else {
+        command = "200314";
+        bytesCommand = hexToBytes(command);
+        crc = Crc16CcittKermit.computeChecksumBytes([bytesCommand[2]]);
+      }
+      final builder = BytesBuilder();
+      builder.add(bytesCommand);
+      builder.add(crc);
+      Uint8List sendBytes = builder.toBytes();
+      print("[SENDING] ${bytesToHex(sendBytes)}");
+      final response = await comm!.sendCommand(sendBytes);
+
+      print(
+        "[RAW FW RESPONSE] ${response != null ? bytesToHex(response) : "null"}",
+      );
+
+      return response;
+    } catch (e) {
+      print("❌ Dongle_GetFirmwareVersion ERROR: $e");
+      return null;
     }
-    final builder = BytesBuilder();
-    builder.add(bytesCommand);
-    builder.add(crc);
-    Uint8List sendBytes = builder.toBytes();
-    print("[SENDING] ${bytesToHex(sendBytes)}");
-    final response = await comm!.sendCommand(sendBytes);
-
-    print("[RAW FW RESPONSE] ${response != null ? bytesToHex(response) : "null"}");
-
-    return response;
-  } catch (e) {
-    print("❌ Dongle_GetFirmwareVersion ERROR: $e");
-    return null;
   }
-}
-
 
   Future<Uint8List?> resetDongle() async {
     try {
       print("------ Inside Dongle_Reset ------");
 
-      String commandBase = isChannel! ? "2001${channelId}01" : "200301";
+      String commandBase = isChannel ? "2001${channelId}01" : "200301";
 
       Uint8List bytesCommand = hexToBytes(commandBase);
 
@@ -200,7 +208,7 @@ Future<Uint8List?> getFirmwareVersion() async {
   Future<Uint8List?> dongleGetProtocol() async {
     String command;
 
-    if (isChannel!) {
+    if (isChannel) {
       command = "2001${channelId}03";
     } else {
       command = "200303";
@@ -219,7 +227,7 @@ Future<Uint8List?> getFirmwareVersion() async {
     String commandBase;
     Uint8List bytesToHash;
 
-    if (isChannel!) {
+    if (isChannel) {
       commandBase = "2002${channelId}02$protoHex";
       Uint8List fullBytes = hexToBytes(commandBase);
       bytesToHash = Uint8List.fromList([fullBytes[3], fullBytes[4]]);
@@ -264,6 +272,180 @@ Future<Uint8List?> getFirmwareVersion() async {
     }
   }
 
+  Future<List<IvnResponseArrayStatus>?> setIvnFrame(
+    List<String> frameIDC,
+  ) async {
+    List<IvnResponseArrayStatus> responseList = [];
+
+    try {
+      for (var frame in frameIDC) {
+        print("------SET_IVN FRAME------");
+
+        String command = "";
+        String crc = "";
+
+        if (isChannel) {
+          if (frame.length == 8) {
+            command =
+                "2005$channelId"
+                "20$frame";
+
+            Uint8List bytesCommand = hexStringToByteArray(command);
+
+            crc = Crc16CcittKermit.computeChecksum([
+              bytesCommand[3],
+              bytesCommand[4],
+              bytesCommand[5],
+              bytesCommand[6],
+              bytesCommand[7],
+            ]).toRadixString(16).padLeft(4, "0");
+          } else {
+            command =
+                "2003$channelId"
+                "20$frame";
+
+            Uint8List bytesCommand = hexStringToByteArray(command);
+
+            crc = Crc16CcittKermit.computeChecksum([
+              bytesCommand[3],
+              bytesCommand[4],
+              bytesCommand[5],
+            ]).toRadixString(16).padLeft(4, "0");
+          }
+        } else {
+          if (frame.length == 8) {
+            command = "200720$frame";
+
+            Uint8List bytesCommand = hexStringToByteArray(command);
+
+            crc = Crc16CcittKermit.computeChecksum([
+              bytesCommand[2],
+              bytesCommand[3],
+              bytesCommand[4],
+              bytesCommand[5],
+              bytesCommand[6],
+            ]).toRadixString(16).padLeft(4, "0");
+          } else {
+            command = "200520$frame";
+
+            Uint8List bytesCommand = hexStringToByteArray(command);
+
+            crc = Crc16CcittKermit.computeChecksum([
+              bytesCommand[2],
+              bytesCommand[3],
+              bytesCommand[4],
+            ]).toRadixString(16).padLeft(4, "0");
+          }
+        }
+
+        Uint8List sendBytes = hexStringToByteArray(command + crc);
+
+        Uint8List? ecuResponseBytes = await comm!.sendCommand(sendBytes);
+
+        String dataStatus = "";
+        Uint8List? actualDataBytes;
+
+        if (isChannel) {
+          var result = ResponseArrayDecoding.checkResponseIVNwithChannel(
+            ecuResponseBytes!,
+            sendBytes,
+            "",
+          );
+
+          actualDataBytes = result.$1;
+          dataStatus = result.$2;
+        } else {
+          var result = ResponseArrayDecoding.checkResponseIVNwithChannel(
+            ecuResponseBytes!,
+            sendBytes,
+            "",
+          );
+
+          actualDataBytes = result.$1;
+          dataStatus = result.$2;
+        }
+
+        if (dataStatus == "READAGAIN") {
+          while (dataStatus == "READAGAIN") {
+            Uint8List? ecuResponseReadBytes = await comm!.readData();
+
+            var result = ResponseArrayDecoding.checkResponse(
+              ecuResponseReadBytes!,
+              sendBytes,
+            );
+
+            Uint8List? actualReadBytes = result.actualDataBytes;
+            String dataReadStatus = result.ecuResponseStatus ?? "";
+
+            dataStatus = dataReadStatus;
+
+            var ivnResponseArrayStatus = IvnResponseArrayStatus(
+              frame: frame,
+              ecuResponse: ecuResponseReadBytes,
+              ecuResponseStatus: dataReadStatus,
+              actualDataBytes: actualReadBytes,
+            );
+
+            responseList.add(ivnResponseArrayStatus);
+
+            print("------EXTRA READ DATA START ------");
+
+            print("ECUResponse: ${byteArrayToString(ecuResponseReadBytes)}");
+
+            if (actualReadBytes != null) {
+              print("ActualDataBytes: ${byteArrayToString(actualReadBytes)}");
+            }
+
+            print("Status: ${ivnResponseArrayStatus.ecuResponseStatus}");
+
+            print("------EXTRA READ DATA END ------");
+          }
+        } else {
+          var ivnResponseArrayStatus = IvnResponseArrayStatus(
+            frame: frame,
+            ecuResponse: ecuResponseBytes,
+            ecuResponseStatus: dataStatus,
+            actualDataBytes: actualDataBytes,
+          );
+
+          responseList.add(ivnResponseArrayStatus);
+
+          if (actualDataBytes != null) {
+            print(
+              "Command BT ACTUAL RESPONSE = ${byteArrayToString(actualDataBytes)}",
+            );
+          } else {
+            print("Command BT ACTUAL RESPONSE = NULL");
+          }
+        }
+      }
+
+      return responseList;
+    } catch (e) {
+      print("IVN Error: $e");
+      return null;
+    }
+  }
+
+  Uint8List hexStringToByteArray(String hex) {
+    hex = hex.replaceAll(" ", "");
+
+    final bytes = Uint8List(hex.length ~/ 2);
+
+    for (int i = 0; i < hex.length; i += 2) {
+      bytes[i ~/ 2] = int.parse(hex.substring(i, i + 2), radix: 16);
+    }
+
+    return bytes;
+  }
+
+  String byteArrayToString(List<int> bytes) {
+    return bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
+  }
+
   // Future<ResponseArrayStatus> can2xTxRx(
   //   int frameLength,
   //   String txDataHex,
@@ -271,7 +453,6 @@ Future<Uint8List?> getFirmwareVersion() async {
   //   return await _lock.synchronized<ResponseArrayStatus>(() async {
   //     try {
   //       print("--- [canTxRx] Internal Process Started ---");
-
 
   //       int dataLength = frameLength + 2;
   //       String command = "";
@@ -285,7 +466,7 @@ Future<Uint8List?> getFirmwareVersion() async {
   //             secondByte.toRadixString(16).padLeft(2, '0') +
   //             channelId! +
   //             txDataHex;
-      
+
   //       } else {
   //         int firstByte = 0x40 | ((dataLength >> 8) & 0x0F);
   //         int secondByte = dataLength & 0xFF;
@@ -422,172 +603,175 @@ Future<Uint8List?> getFirmwareVersion() async {
   Future<ResponseArrayStatus> can2xTxRx(
     int frameLength,
     String txDataHex,
-) async {
-  return await _lock.synchronized<ResponseArrayStatus>(() async {
-    try {
-      print("--- [canTxRx] Internal Process Started ---");
+  ) async {
+    return await _lock.synchronized<ResponseArrayStatus>(() async {
+      try {
+        print("--- [canTxRx] Internal Process Started ---");
 
-      int dataLength = frameLength + 2;
-      String command = "";
+        int dataLength = frameLength + 2;
+        String command = "";
 
-      // 1️⃣ Packet Construction
-      if (isChannel!) {
-        int firstByte = 0x40 | ((frameLength >> 8) & 0x0F);
-        int secondByte = frameLength & 0xFF;
-        command =
-            firstByte.toRadixString(16).padLeft(2, '0') +
-            secondByte.toRadixString(16).padLeft(2, '0') +
-            channelId! +
-            txDataHex;
-      } else {
-        int firstByte = 0x40 | ((dataLength >> 8) & 0x0F);
-        int secondByte = dataLength & 0xFF;
-        command =
-            firstByte.toRadixString(16).padLeft(2, '0') +
-            secondByte.toRadixString(16).padLeft(2, '0') +
-            txDataHex;
-      }
-
-      // Compute CRC16
-      Uint8List crcBytesInput = hexToBytes(txDataHex);
-      int crcValue = Crc16CcittKermit.computeChecksum(crcBytesInput);
-      String crcHex = crcValue.toRadixString(16).padLeft(4, '0').toUpperCase();
-
-      Uint8List sendBytes = hexToBytes(command + crcHex);
-      print("[canTxRx] Built Packet: ${bytesToHex(sendBytes)}");
-
-      String formattedTx = bytesToHex(sendBytes)
-          .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ')
-          .trim();
-      
-      // Using ?.add ensures that if logs is somehow still null, it won't crash
-      logs.add(SessionLogsModel(header: "Tx", message: formattedTx));
-
-      // 2️⃣ Transmit and Retry Logic
-      int noOfTimesSent = 0;
-      while (noOfTimesSent < 5) {
-        noOfTimesSent++;
-        print("[canTxRx] Attempt: $noOfTimesSent");
-
-        Uint8List? response = await comm!.sendCommand(sendBytes);
-
-        if (response == null || response.isEmpty) {
-          print("[canTxRx] Error: Null/Empty response. Retrying...");
-          await Future.delayed(Duration(milliseconds: 100));
-          continue;
-        }
-
-        // // ✅ Add RX packet to session logs
-        // String formattedRx = bytesToHex(response)
-        //     .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ')
-        //     .trim();
-      // logs!.add(SessionLogsModel(header: "Rx", message: formattedRx));
-
-        print("[canTxRx] Raw Received: ${bytesToHex(response)}");
-
-        // 🔥 ALWAYS extract ECU packet
-        Uint8List? ecuOnly = extractEcuPacket(response);
-        if (ecuOnly != null) {
-          print("[canTxRx] ECU Extracted: ${bytesToHex(ecuOnly)}");
-          response = ecuOnly; // overwrite response
-        }
-
-        Uint8List? actualData;
-        String dataStatus;
-
-        // Initial Decode
-        if (isChannel!) {
-          (
-            actualData,
-            dataStatus,
-          ) = ResponseArrayDecoding.CheckResponseWithChannel(
-            response,
-            sendBytes,
-          );
+        // 1️⃣ Packet Construction
+        if (isChannel) {
+          int firstByte = 0x40 | ((frameLength >> 8) & 0x0F);
+          int secondByte = frameLength & 0xFF;
+          command =
+              firstByte.toRadixString(16).padLeft(2, '0') +
+              secondByte.toRadixString(16).padLeft(2, '0') +
+              channelId! +
+              txDataHex;
         } else {
-          ResponseArrayStatus decoded = ResponseArrayDecoding.checkResponse(
-            response,
-            sendBytes,
-          );
-
-          actualData = decoded.actualDataBytes;
-          dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+          int firstByte = 0x40 | ((dataLength >> 8) & 0x0F);
+          int secondByte = dataLength & 0xFF;
+          command =
+              firstByte.toRadixString(16).padLeft(2, '0') +
+              secondByte.toRadixString(16).padLeft(2, '0') +
+              txDataHex;
         }
 
-        // 4️⃣ Sequential Handshake Loop (for slower ECUs)
-        if (dataStatus == "READAGAIN") {
-          int readAttempts = 0;
-          while (dataStatus == "READAGAIN" && readAttempts < 5) {
-            readAttempts++;
-            print(
-              "[canTxRx] Handshake Attempt $readAttempts: Waiting for data...",
+        // Compute CRC16
+        Uint8List crcBytesInput = hexToBytes(txDataHex);
+        int crcValue = Crc16CcittKermit.computeChecksum(crcBytesInput);
+        String crcHex = crcValue
+            .toRadixString(16)
+            .padLeft(4, '0')
+            .toUpperCase();
+
+        Uint8List sendBytes = hexToBytes(command + crcHex);
+        print("[canTxRx] Built Packet: ${bytesToHex(sendBytes)}");
+
+        String formattedTx = bytesToHex(
+          sendBytes,
+        ).replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ').trim();
+
+        // Using ?.add ensures that if logs is somehow still null, it won't crash
+        logs.add(SessionLogsModel(header: "Tx", message: formattedTx));
+
+        // 2️⃣ Transmit and Retry Logic
+        int noOfTimesSent = 0;
+        while (noOfTimesSent < 5) {
+          noOfTimesSent++;
+          print("[canTxRx] Attempt: $noOfTimesSent");
+
+          Uint8List? response = await comm!.sendCommand(sendBytes);
+
+          if (response == null || response.isEmpty) {
+            print("[canTxRx] Error: Null/Empty response. Retrying...");
+            await Future.delayed(Duration(milliseconds: 100));
+            continue;
+          }
+
+          // // ✅ Add RX packet to session logs
+          // String formattedRx = bytesToHex(response)
+          //     .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)} ')
+          //     .trim();
+          // logs!.add(SessionLogsModel(header: "Rx", message: formattedRx));
+
+          print("[canTxRx] Raw Received: ${bytesToHex(response)}");
+
+          // 🔥 ALWAYS extract ECU packet
+          Uint8List? ecuOnly = extractEcuPacket(response);
+          if (ecuOnly != null) {
+            print("[canTxRx] ECU Extracted: ${bytesToHex(ecuOnly)}");
+            response = ecuOnly; // overwrite response
+          }
+
+          Uint8List? actualData;
+          String dataStatus;
+
+          // Initial Decode
+          if (isChannel) {
+            (
+              actualData,
+              dataStatus,
+            ) = ResponseArrayDecoding.CheckResponseWithChannel(
+              response,
+              sendBytes,
+            );
+          } else {
+            ResponseArrayStatus decoded = ResponseArrayDecoding.checkResponse(
+              response,
+              sendBytes,
             );
 
-            await Future.delayed(Duration(milliseconds: 50 * readAttempts));
+            actualData = decoded.actualDataBytes;
+            dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+          }
 
-            Uint8List? extraData = await comm!.readData();
-            if (extraData == null || extraData.isEmpty) continue;
-
-            print("[canTxRx] ExtraData Received: ${bytesToHex(extraData)}");
-            if (isChannel!) {
-              (
-                actualData,
-                dataStatus,
-              ) = ResponseArrayDecoding.CheckResponseWithChannel(
-                extraData,
-                sendBytes,
+          // 4️⃣ Sequential Handshake Loop (for slower ECUs)
+          if (dataStatus == "READAGAIN") {
+            int readAttempts = 0;
+            while (dataStatus == "READAGAIN" && readAttempts < 5) {
+              readAttempts++;
+              print(
+                "[canTxRx] Handshake Attempt $readAttempts: Waiting for data...",
               );
-            } else {
-              ResponseArrayStatus decoded =
-                  ResponseArrayDecoding.checkResponse(response, sendBytes);
 
-              actualData = decoded.actualDataBytes;
-              dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
-            }
+              await Future.delayed(Duration(milliseconds: 50 * readAttempts));
 
-            if (dataStatus != "READAGAIN") {
-              return ResponseArrayStatus(
-                ecuResponse: extraData,
-                ecuResponseStatus: dataStatus,
-                actualDataBytes: actualData,
-                sentBytes: sendBytes,
-              );
+              Uint8List? extraData = await comm!.readData();
+              if (extraData == null || extraData.isEmpty) continue;
+
+              print("[canTxRx] ExtraData Received: ${bytesToHex(extraData)}");
+              if (isChannel) {
+                (
+                  actualData,
+                  dataStatus,
+                ) = ResponseArrayDecoding.CheckResponseWithChannel(
+                  extraData,
+                  sendBytes,
+                );
+              } else {
+                ResponseArrayStatus decoded =
+                    ResponseArrayDecoding.checkResponse(response, sendBytes);
+
+                actualData = decoded.actualDataBytes;
+                dataStatus = decoded.ecuResponseStatus ?? "GENERALERROR";
+              }
+
+              if (dataStatus != "READAGAIN") {
+                return ResponseArrayStatus(
+                  ecuResponse: extraData,
+                  ecuResponseStatus: dataStatus,
+                  actualDataBytes: actualData,
+                  sentBytes: sendBytes,
+                );
+              }
             }
           }
+
+          if (dataStatus == "SENDAGAIN") {
+            await Future.delayed(Duration(milliseconds: 200));
+            continue;
+          }
+
+          // Standard Success Return
+          return ResponseArrayStatus(
+            ecuResponse: response,
+            ecuResponseStatus: dataStatus,
+            actualDataBytes: actualData,
+            sentBytes: sendBytes,
+          );
         }
 
-        if (dataStatus == "SENDAGAIN") {
-          await Future.delayed(Duration(milliseconds: 200));
-          continue;
-        }
-
-        // Standard Success Return
+        // Timeout after 5 attempts
         return ResponseArrayStatus(
-          ecuResponse: response,
-          ecuResponseStatus: dataStatus,
-          actualDataBytes: actualData,
+          ecuResponseStatus: "DONGLEERROR_TIMEOUT",
           sentBytes: sendBytes,
         );
+      } catch (e) {
+        print("[canTxRx] EXCEPTION: $e");
+        return ResponseArrayStatus(ecuResponseStatus: "EXCEPTION: $e");
       }
+    });
+  }
 
-      // Timeout after 5 attempts
-      return ResponseArrayStatus(
-        ecuResponseStatus: "DONGLEERROR_TIMEOUT",
-        sentBytes: sendBytes,
-      );
-    } catch (e) {
-      print("[canTxRx] EXCEPTION: $e");
-      return ResponseArrayStatus(ecuResponseStatus: "EXCEPTION: $e");
-    }
-  });
-}
-
-
-  
-String bytesToHex(Uint8List bytes) {
-  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('').toUpperCase();
-}
-
+  String bytesToHex(Uint8List bytes) {
+    return bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join('')
+        .toUpperCase();
+  }
 
   // String bytesToHex(Uint8List bytes) {
   //   return bytes
@@ -657,7 +841,7 @@ String bytesToHex(Uint8List bytes) {
     try {
       Uint8List sendBytes = await canSetHardRxHeaderMask(
         frameId,
-        isChannel!,
+        isChannel,
         channelId!,
       );
       var response = await comm!.sendCommand(sendBytes);
@@ -665,7 +849,7 @@ String bytesToHex(Uint8List bytes) {
       if (response == null) throw Exception("Response was null");
       Uint8List ecuResponseBytes = Uint8List.fromList(response);
 
-      var decoded = isChannel!
+      var decoded = isChannel
           ? ResponseArrayDecoding.checkResponseIVNwithChannel(
               ecuResponseBytes,
               sendBytes,
@@ -745,7 +929,7 @@ String bytesToHex(Uint8List bytes) {
 
     // 2. Build Command and Select CRC Range
     if (is11Bit) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2003$channelId"
             "04$txHeader";
@@ -757,7 +941,7 @@ String bytesToHex(Uint8List bytes) {
         crcInput = bytes.sublist(2, 5); // bytes[2], [3], [4]
       }
     } else if (is29Bit) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2005$channelId"
             "04$txHeader";
@@ -769,7 +953,7 @@ String bytesToHex(Uint8List bytes) {
         crcInput = bytes.sublist(2, 7); // bytes[2] through [6]
       }
     } else if (isKWP) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2002$channelId"
             "04$txHeader";
@@ -800,7 +984,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> crcInput = [];
 
-    if (isChannel!) {
+    if (isChannel) {
       // Structure: 0x20 0x01 [ChannelId] 0x05
       command =
           "2001$channelId"
@@ -868,7 +1052,7 @@ String bytesToHex(Uint8List bytes) {
       Protocol.ISO14230_4KWP_FASTINIT_C0,
     ].contains(currentProtocol);
     if (is11Bit) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2003$channelId"
             "06$rxhdrmsk";
@@ -880,7 +1064,7 @@ String bytesToHex(Uint8List bytes) {
         crcInput = bytes.sublist(2, 5); // Equivalent to bytes[2], [3], [4]
       }
     } else if (is29Bit) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2005$channelId"
             "06$rxhdrmsk";
@@ -892,7 +1076,7 @@ String bytesToHex(Uint8List bytes) {
         crcInput = bytes.sublist(2, 7); // Equivalent to bytes[2] through [6]
       }
     } else if (isKWP) {
-      if (isChannel!) {
+      if (isChannel) {
         command =
             "2002$channelId"
             "06$rxhdrmsk";
@@ -920,7 +1104,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> crcInput = [];
 
-    if (isChannel!) {
+    if (isChannel) {
       command =
           "2001$channelId"
           "07";
@@ -945,7 +1129,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel!) {
+    if (isChannel) {
       command = "2001${channelId}0d";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -973,7 +1157,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel!) {
+    if (isChannel) {
       command = "2003${channelId}0e$p2max";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1000,7 +1184,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel!) {
+    if (isChannel) {
       command = "2001${channelId}0f";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1031,7 +1215,7 @@ String bytesToHex(Uint8List bytes) {
         comm!.connectivity.value == Connectivity.ble) {
       String command = "";
       List<int> checksumBytes;
-      if (isChannel!) {
+      if (isChannel) {
         command = "2001${channelId}10";
         Uint8List bytesCommand = hexToBytes(command);
         checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1072,7 +1256,7 @@ String bytesToHex(Uint8List bytes) {
         currentConn == Connectivity.ble) {
       String command = "";
       List<int> checksumBytes;
-      if (isChannel!) {
+      if (isChannel) {
         command = "2001${channelId}11";
         Uint8List bytesCommand = hexToBytes(command);
         checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1108,7 +1292,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     List<int> checksumBytes;
 
-    if (isChannel!) {
+    if (isChannel) {
       command = "2002${channelId}0c$commValue";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1136,7 +1320,7 @@ String bytesToHex(Uint8List bytes) {
     print("------CAN_StartPadding------");
     String command = "";
     List<int> checksumBytes;
-    if (isChannel!) {
+    if (isChannel) {
       command = "2002${channelId}12$paddingByte";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1162,7 +1346,7 @@ String bytesToHex(Uint8List bytes) {
 
     String command = "";
     List<int> checksumBytes;
-    if (isChannel!) {
+    if (isChannel) {
       command = "2001${channelId}13";
       Uint8List bytesCommand = hexToBytes(command);
       checksumBytes = Crc16CcittKermit.computeChecksumBytes(
@@ -1188,7 +1372,7 @@ String bytesToHex(Uint8List bytes) {
     String command = "";
     Uint8List bytesCommand;
     Uint8List outArray;
-    if (isChannel!) {
+    if (isChannel) {
       int len = (ssidHex.length ~/ 2) + 3;
       String lenHex = len.toRadixString(16).padLeft(2, '0').toUpperCase();
       command = "20$lenHex$channelId" + "1601${ssidHex}00";
@@ -1214,7 +1398,7 @@ String bytesToHex(Uint8List bytes) {
     print("------Wifi_WritePassword------");
     String command = "";
     Uint8List outArray;
-    if (isChannel!) {
+    if (isChannel) {
       int len = (passwordHex.length ~/ 2) + 3;
       String lenHex = len.toRadixString(16).padLeft(2, '0').toUpperCase();
       command = "20$lenHex$channelId" + "1701${passwordHex}00";
@@ -1825,7 +2009,7 @@ String bytesToHex(Uint8List bytes) {
                   rawRxBytes,
                   diagnosticPayload,
                 )
-              : isChannel!
+              : isChannel
               ? ResponseArrayDecoding.CheckResponseWithChannel(
                       rawRxBytes,
                       standardFullPacket,
