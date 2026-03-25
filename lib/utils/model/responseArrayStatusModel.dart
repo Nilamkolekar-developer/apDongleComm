@@ -4,14 +4,22 @@ class ResponseArrayStatus {
   String? ecuResponseStatus;
   Uint8List? ecuResponse;
   Uint8List? actualDataBytes;
-Uint8List? sentBytes;
+ 
 
   ResponseArrayStatus({
     this.ecuResponseStatus,
     this.ecuResponse,
     this.actualDataBytes,
-    this.sentBytes,
+
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      "ecuResponseStatus": ecuResponseStatus,
+      "ecuResponse": ecuResponse?.map((e) => e.toRadixString(16).padLeft(2, '0')).join(),
+      "actualDataBytes": actualDataBytes?.map((e) => e.toRadixString(16).padLeft(2, '0')).join(),
+    };
+  }
 }
 
 class IvnResponseArrayStatus {
