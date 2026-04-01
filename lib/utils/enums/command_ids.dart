@@ -1,7 +1,5 @@
 // lib/src/enums/command_ids.dart
 
-import 'dart:typed_data';
-
 enum DWCommandId {
   none(0x00),
   clientConnect(0x01),
@@ -18,11 +16,10 @@ enum DWCommandId {
 
   static DWCommandId fromValue(int val) {
     return DWCommandId.values.firstWhere(
-      (e) => e.value == val, 
-      orElse: () => DWCommandId.none
+      (e) => e.value == val,
+      orElse: () => DWCommandId.none,
     );
   }
-
 }
 
 enum SubCommandId {
@@ -32,7 +29,6 @@ enum SubCommandId {
   setEcuIp(0x33),
   setTesterPresent(0x65),
   stopTesterPresent(0x66);
-  
 
   final int value;
   const SubCommandId(this.value);
@@ -51,19 +47,8 @@ enum DoipMsgType {
 
   static DoipMsgType fromValue(int val) {
     return DoipMsgType.values.firstWhere(
-      (e) => e.value == val, 
-      orElse: () => DoipMsgType.unknown, 
+      (e) => e.value == val,
+      orElse: () => DoipMsgType.unknown,
     );
   }
-}
-
-class Rp1210SendResult {
-  final Uint8List sentPacket;
-  final Uint8List? response;
-  
-
-  Rp1210SendResult({
-    required this.sentPacket,
-    required this.response,
-  });
 }

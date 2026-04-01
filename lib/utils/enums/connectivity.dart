@@ -11,5 +11,5 @@ enum Connectivity {
   canFdUsb,
   canFdWiFi,
   doipUsb,
-  doipWiFi, canfdUSB,
+  doipWiFi,
 }
