@@ -8,8 +8,6 @@ class ResponseArrayDecoding {
   static String halfActualRespons = "";
   static int actualLenth = 0;
 
-  /// Main decoding method mimicking the C# 'CheckResponse'
-  /// Since Dart doesn't have 'out' parameters, we return a Map or a custom Model.
   static Map<String, dynamic> checkResponse(
     Uint8List pidBytesResponse,
     Uint8List requestBytes,
@@ -26,7 +24,7 @@ class ResponseArrayDecoding {
       bool endOfPacket = false;
       int frameLen = 0;
 
-      // --- Request Parsing ---
+      // ── Request Parsing ───────────────────────────────────────────────
       if (request[0] == 0x20) {
         reqType = "CONFIGREQUEST";
         switch (request[2]) {
@@ -62,38 +60,62 @@ class ResponseArrayDecoding {
         expectedFrame = "DONGLECONFIGACK";
       }
 
-      // --- Parser Start ---
+      // ── Parser Loop ───────────────────────────────────────────────────
       nextPacketIndex = 0;
       endOfPacket = false;
 
       while (!endOfPacket) {
-        // Range check to prevent crashes
+        // ✅ FIX: Range check — prevent index out of bounds
         if (nextPacketIndex >= responseBytes.length) {
           status = "READAGAIN";
           endOfPacket = true;
           break;
         }
 
+        // ── BRANCH A: Dongle Config/ACK frame (0x20) ──────────────────
         if (responseBytes[nextPacketIndex] == 0x20) {
+          // ✅ FIX: Bounds check before reading next byte
+          if (nextPacketIndex + 1 >= responseBytes.length) {
+            status = "READAGAIN";
+            endOfPacket = true;
+            break;
+          }
+
           frameLen = responseBytes[nextPacketIndex + 1];
 
           if (reqType == "CONFIGREQUEST") {
             endOfPacket = true;
+
             if (expectedFrame == "DONGLECONFIGRESPONSE") {
               int length = frameLen - 2;
+
+              // ✅ FIX: Guard negative/zero length
+              if (length <= 0) {
+                status = "NOERROR";
+                dataArray = Uint8List(0);
+                break;
+              }
+
+              // ✅ FIX: Bounds check before sublist
+              int start = nextPacketIndex + 3;
+              int end = start + length;
+              if (end > responseBytes.length) {
+                status = "READAGAIN";
+                break;
+              }
+
               Uint8List responseArray = Uint8List(length);
               responseArray.setRange(
                 0,
                 length,
-                responseBytes.sublist(
-                  nextPacketIndex + 3,
-                  nextPacketIndex + 3 + length,
-                ),
+                responseBytes.sublist(start, end),
               );
               dataArray = responseArray;
             }
-          } else if (responseBytes[nextPacketIndex + 1] == 0x03) {
-            // DATAREQUEST and dongle positive acknowledgement
+            // else DONGLECONFIGACK — no data to extract, status stays NOERROR
+          } else if (frameLen == 0x03) {
+            // DATAREQUEST — dongle positive ACK (0x20 0x03 ...)
+
             if (firstposdongleackreceived == true) {
               firstposdongleackreceived = false;
               endOfPacket = true;
@@ -108,55 +130,72 @@ class ResponseArrayDecoding {
             firstposdongleackreceived = true;
 
             if (nextPacketIndex < responseBytes.length) {
-              endOfPacket = false;
+              endOfPacket = false; // continue loop to read ECU response
             } else {
               status = "READAGAIN";
               endOfPacket = true;
               break;
             }
           } else {
-            // DATAREQUEST and dongle negative acknowledgement
+            // DATAREQUEST — dongle negative ACK
             endOfPacket = true;
             firstposdongleackreceived = false;
 
-            switch (responseBytes[3]) {
-              case 0x10:
-                status = "DONGLEERROR_COMMANDNOTSUPPORTED";
-                break;
-              case 0x12:
-                status = "DONGLEERROR_INPUTNOTSUPPORTED";
-                break;
-              case 0x13:
-                status = "DONGLEERROR_INVALIDFORMAT";
-                break;
-              case 0x14:
-                status = "DONGLEERROR_INVALIDOPERATION";
-                break;
-              case 0x15:
-                status = "DONGLEERROR_CRCFAILURE";
-                break;
-              case 0x16:
-                status = "DONGLEERROR_PROTOCOLNOTSET";
-                break;
-              case 0x33:
-                status = "DONGLEERROR_SECURITYACCESSDENIED";
-                break;
+            // ✅ FIX: Bounds check before reading error byte
+            if (responseBytes.length > 3) {
+              switch (responseBytes[3]) {
+                case 0x10:
+                  status = "DONGLEERROR_COMMANDNOTSUPPORTED";
+                  break;
+                case 0x12:
+                  status = "DONGLEERROR_INPUTNOTSUPPORTED";
+                  break;
+                case 0x13:
+                  status = "DONGLEERROR_INVALIDFORMAT";
+                  break;
+                case 0x14:
+                  status = "DONGLEERROR_INVALIDOPERATION";
+                  break;
+                case 0x15:
+                  status = "DONGLEERROR_CRCFAILURE";
+                  break;
+                case 0x16:
+                  status = "DONGLEERROR_PROTOCOLNOTSET";
+                  break;
+                case 0x33:
+                  status = "DONGLEERROR_SECURITYACCESSDENIED";
+                  break;
+                default:
+                  status = "SENDAGAIN";
+                  break;
+              }
+            } else {
+              status = "SENDAGAIN";
             }
-            status = "SENDAGAIN";
           }
         }
-        // No response from ECU for P2MAX
-        else if (((responseBytes[nextPacketIndex] & 0xF0) == 0x40) &&
-            (responseBytes[nextPacketIndex + 1] == 0x02)) {
+        // ── BRANCH B: No ECU response — 0x40xx with length 0x00 or 0x02 ──
+        // ✅ FIX: Added 0x00 length check — dongle sends 40 00 FF FF for no ECU response
+        else if ((responseBytes[nextPacketIndex] & 0xF0) == 0x40 &&
+            (responseBytes.length > nextPacketIndex + 1) &&
+            (responseBytes[nextPacketIndex + 1] == 0x02 ||
+                responseBytes[nextPacketIndex + 1] == 0x00)) {
           status = "ECUERROR_NORESPONSEFROMECU";
           endOfPacket = true;
           firstposdongleackreceived = false;
           break;
         }
-        // ECU Data Response (4x)
-        else if (((responseBytes[nextPacketIndex] & 0xF0) == 0x40) ||
+        // ── BRANCH C: ECU Data Response (0x4x with actual length) ────────
+        else if ((responseBytes[nextPacketIndex] & 0xF0) == 0x40 ||
             halfActualRespons.isNotEmpty) {
           firstposdongleackreceived = false;
+
+          // ✅ FIX: Bounds check before reading length byte
+          if (nextPacketIndex + 1 >= responseBytes.length) {
+            status = "READAGAIN";
+            endOfPacket = true;
+            break;
+          }
 
           var msgLen =
               ((responseBytes[nextPacketIndex] & 0x0F) << 8) +
@@ -167,12 +206,27 @@ class ResponseArrayDecoding {
             actualLenth = msgLen;
           }
 
-          // ECU Negative Response (7F)
+          // ✅ FIX: Bounds check before reading payload byte
+          if (nextPacketIndex + 2 >= responseBytes.length) {
+            status = "READAGAIN";
+            endOfPacket = true;
+            break;
+          }
+
+          // ── ECU Negative Response (7F) ─────────────────────────────
           if (responseBytes[nextPacketIndex + 2] == 0x7F) {
+            // ✅ FIX: Bounds check before reading NRC byte
+            if (nextPacketIndex + 4 >= responseBytes.length) {
+              status = "READAGAIN";
+              endOfPacket = true;
+              break;
+            }
+
             if (responseBytes[nextPacketIndex + 4] == 0x78) {
-              // NRC 78: Request next packet
+              // NRC 0x78: Response pending — read again
               nextPacketIndex += 7;
               endOfPacket = false;
+
               if (nextPacketIndex > responseBytes.length - 1) {
                 status = "READAGAIN";
                 endOfPacket = true;
@@ -180,7 +234,6 @@ class ResponseArrayDecoding {
               }
             } else {
               endOfPacket = true;
-              // Map UDS Negative Response Codes
               switch (responseBytes[nextPacketIndex + 4]) {
                 case 0x10:
                   status = "ECUERROR_GENERALREJECT";
@@ -293,23 +346,42 @@ class ResponseArrayDecoding {
                 case 0x93:
                   status = "ECUERROR_VOLTAGETOOLOW";
                   break;
+                default:
+                  status = "ECUERROR_UNKNOWN";
+                  break;
               }
             }
           }
-          // Positive response from ECU
+          // ── ECU Positive Response ──────────────────────────────────
           else {
             endOfPacket = true;
             int length = frameLen - 2;
+
+            // ✅ FIX: Guard against negative/zero length (e.g. 40 00 00 FF FF)
+            if (length <= 0) {
+              status = "ECUERROR_NORESPONSEFROMECU";
+              dataArray = Uint8List(0);
+              firstposdongleackreceived = false;
+              break;
+            }
+
             Uint8List responseArray = Uint8List(length);
 
             val =
-                "${byteArrayToHex(responseBytes)}, ${nextPacketIndex + 2}, ${byteArrayToHex(responseArray)}, 0, ${frameLen - 2}";
+                "${byteArrayToHex(responseBytes)}, ${nextPacketIndex + 2}, "
+                "${byteArrayToHex(responseArray)}, 0, ${frameLen - 2}";
             developer.log("Array Copy Detail: $val");
 
             if (halfActualRespons.isNotEmpty) {
               halfActualRespons += byteArrayToHex(responseBytes);
               responseBytes = hexToUint8List(halfActualRespons);
               frameLen = actualLenth;
+            }
+
+            // ✅ FIX: Bounds check before reading responseBytes[1]
+            if (responseBytes.length < 2) {
+              status = "READAGAIN";
+              break;
             }
 
             if ((responseBytes.length - 2) < responseBytes[1]) {
@@ -321,7 +393,6 @@ class ResponseArrayDecoding {
                 actualLenth = 0;
               }
               status = "NOERROR";
-              // Manual copy logic
               for (int j = 0; j < (frameLen - 2); j++) {
                 if (nextPacketIndex + 2 + j < responseBytes.length) {
                   responseArray[j] = responseBytes[nextPacketIndex + 2 + j];
@@ -330,12 +401,14 @@ class ResponseArrayDecoding {
               dataArray = responseArray;
             }
           }
-        } else {
+        }
+        // ── BRANCH D: Unknown / invalid response ──────────────────────
+        else {
           status = "GENERALERROR_INVALIDRESPFROMDONGLE";
           firstposdongleackreceived = false;
           endOfPacket = true;
         }
-      }
+      } // end while
     } catch (ex, stack) {
       dataArray = Uint8List(0);
       status = "$val\n\n${ex.toString()}\n\n${stack.toString()}";
@@ -343,7 +416,6 @@ class ResponseArrayDecoding {
 
     return {"dataArray": dataArray, "status": status};
   }
-
   // --- Static Helper Methods ---
 
   static String byteArrayToHex(Uint8List ba) {
@@ -1310,20 +1382,11 @@ class ResponseArrayDecoding {
       int nextPacketIndex = 0;
       bool endOfPacket = false;
 
-      // Parser Loop
-      while (!endOfPacket) {
-        // Range check to prevent out of bounds
-        if (nextPacketIndex >= responseBytes.length) {
-          endOfPacket = true;
-          break;
-        }
-
-        // 1. Check for Negative Response SID (0x7F)
+      while (endOfPacket == false) {
         if (responseBytes[nextPacketIndex] == 0x7F) {
-          // Check for NRC 0x78 (Response Pending)
           if (responseBytes[nextPacketIndex + 2] == 0x78) {
-            /* read next packet */
-            nextPacketIndex += 7; // Standard RP1210 skip for pending frame
+            // read next packet
+            nextPacketIndex += 7;
             endOfPacket = false;
 
             if (nextPacketIndex > responseBytes.length - 1) {
@@ -1332,35 +1395,140 @@ class ResponseArrayDecoding {
               break;
             }
           } else {
-            // Permanent Negative Response
             endOfPacket = true;
-            int nrc = responseBytes[nextPacketIndex + 2];
 
-            // Map ECU Negative Response Codes
-            status = _mapStandardNRC(nrc);
+            // ECU negative response
+            switch (responseBytes[nextPacketIndex + 2]) {
+              case 0x10:
+                status = "ECUERROR_GENERALREJECT";
+                break;
+              case 0x11:
+                status = "ECUERROR_SERVICENOTSUPPORTED";
+                break;
+              case 0x12:
+                status = "ECUERROR_SUBFUNCTIONNOTSUPPORTED";
+                break;
+              case 0x13:
+                status = "ECUERROR_INVALIDFORMAT";
+                break;
+              case 0x14:
+                status = "ECUERROR_RESPONSETOOLONG";
+                break;
+              case 0x21:
+                status = "ECUERROR_BUSYREPEATREQUEST";
+                break;
+              case 0x22:
+                status = "ECUERROR_CONDITIONSNOTCORRECT";
+                break;
+              case 0x24:
+                status = "ECUERROR_REQUESTSEQUENCEERROR";
+                break;
+              case 0x31:
+                status = "ECUERROR_REQUESTOUTOFRANGE";
+                break;
+              case 0x33:
+                status = "ECUERROR_SECURITYACCESSDENIED";
+                break;
+              case 0x35:
+                status = "ECUERROR_INVALIDKEY";
+                break;
+              case 0x36:
+                status = "ECUERROR_EXCEEDEDNUMBEROFATTEMPTS";
+                break;
+              case 0x37:
+                status = "ECUERROR_REQUIREDTIMEDELAYNOTEXPIRED";
+                break;
+              case 0x70:
+                status = "ECUERROR_UPLOADDOWNLOADNOTACCEPTED";
+                break;
+              case 0x71:
+                status = "ECUERROR_TRANSFERDATASUSPENDED";
+                break;
+              case 0x72:
+                status = "ECUERROR_GENERALPROGRAMMINGFAILURE";
+                break;
+              case 0x73:
+                status = "ECUERROR_WRONGBLOCKSEQCOUNTER";
+                break;
+              case 0x7E:
+                status = "ECUERROR_SUBFNNOTSUPPORTEDINACTIVESESSION";
+                break;
+              case 0x7F:
+                status = "ECUERROR_SERVICENOTSUPPORTEDINACTIVESESSION";
+                break;
+              case 0x81:
+                status = "ECUERROR_RPMTOOHIGH";
+                break;
+              case 0x82:
+                status = "ECUERROR_RPMTOOLOW";
+                break;
+              case 0x83:
+                status = "ECUERROR_ENGINEISRUNNING";
+                break;
+              case 0x84:
+                status = "ECUERROR_ENGINEISNOTRUNNING";
+                break;
+              case 0x85:
+                status = "ECUERROR_ENGINERUNTIMETOOLOW";
+                break;
+              case 0x86:
+                status = "ECUERROR_TEMPTOOHIGH";
+                break;
+              case 0x87:
+                status = "ECUERROR_TEMPTOOLOW";
+                break;
+              case 0x88:
+                status = "ECUERROR_VEHSPEEDTOOHIGH";
+                break;
+              case 0x89:
+                status = "ECUERROR_VEHSPEEDTOOLOW";
+                break;
+              case 0x8A:
+                status = "ECUERROR_THROTTLETOOHIGH";
+                break;
+              case 0x8B:
+                status = "ECUERROR_THROTTLETOOLOW";
+                break;
+              case 0x8C:
+                status = "ECUERROR_TRANSMISSIONRANGENOTINNEUTRAL";
+                break;
+              case 0x8D:
+                status = "ECUERROR_TRANSMISSIONRANGENOTINGEAR";
+                break;
+              case 0x8F:
+                status = "ECUERROR_BRKPEDALNOTPRESSED";
+                break;
+              case 0x90:
+                status = "ECUERROR_SHIFTERLEVERNOTINPARK";
+                break;
+              case 0x91:
+                status = "ECUERROR_TRQCONVERTERCLUTCHLOCKED";
+                break;
+              case 0x92:
+                status = "ECUERROR_VOLTAGETOOHIGH";
+                break;
+              case 0x93:
+                status = "ECUERROR_VOLTAGETOOLOW";
+                break;
+            }
 
-            // dataArray = new byte[3]; Array.Copy(responeBytes, nextpacketindex, dataArray, 0, 3);
-            dataArray = responseBytes.sublist(
-              nextPacketIndex,
-              nextPacketIndex + 3,
-            );
+            // Array.Copy(responeBytes, nextpacketindex, dataArray, 0, 3)
+            dataArray = Uint8List(3);
+            for (int i = 0; i < 3; i++) {
+              dataArray[i] = responseBytes[nextPacketIndex + i];
+            }
           }
         } else {
-          // 2. Positive Response Validation (SID + 0x40)
-          int respFirstByte = responseBytes[nextPacketIndex];
+          int respFirstByte = responseBytes[0];
           int reqFirstByte = request[0];
 
-          if (respFirstByte == (reqFirstByte + 0x40)) {
+          if (respFirstByte == reqFirstByte + 0x40) {
             status = "NOERROR";
             endOfPacket = true;
-            // For RP1210, we usually return the whole buffer as dataArray
-            dataArray = responseBytes;
           } else {
-            // Handle specific error byte 0x01
             if (respFirstByte == 0x01) {
               status = "ECUERROR_NORESPONSEFROMECU";
             } else {
-              // Generic fallback for mismatched SID
               status = "READAGAIN";
             }
             endOfPacket = true;
@@ -1373,87 +1541,5 @@ class ResponseArrayDecoding {
     }
 
     return {"dataArray": dataArray, "status": status};
-  }
-
-  /// Internal helper to map UDS/KWP Negative Response Codes
-  static String _mapStandardNRC(int nrc) {
-    switch (nrc) {
-      case 0x10:
-        return "ECUERROR_GENERALREJECT";
-      case 0x11:
-        return "ECUERROR_SERVICENOTSUPPORTED";
-      case 0x12:
-        return "ECUERROR_SUBFUNCTIONNOTSUPPORTED";
-      case 0x13:
-        return "ECUERROR_INVALIDFORMAT";
-      case 0x14:
-        return "ECUERROR_RESPONSETOOLONG";
-      case 0x21:
-        return "ECUERROR_BUSYREPEATREQUEST";
-      case 0x22:
-        return "ECUERROR_CONDITIONSNOTCORRECT";
-      case 0x24:
-        return "ECUERROR_REQUESTSEQUENCEERROR";
-      case 0x31:
-        return "ECUERROR_REQUESTOUTOFRANGE";
-      case 0x33:
-        return "ECUERROR_SECURITYACCESSDENIED";
-      case 0x35:
-        return "ECUERROR_INVALIDKEY";
-      case 0x36:
-        return "ECUERROR_EXCEEDEDNUMBEROFATTEMPTS";
-      case 0x37:
-        return "ECUERROR_REQUIREDTIMEDELAYNOTEXPIRED";
-      case 0x70:
-        return "ECUERROR_UPLOADDOWNLOADNOTACCEPTED";
-      case 0x71:
-        return "ECUERROR_TRANSFERDATASUSPENDED";
-      case 0x72:
-        return "ECUERROR_GENERALPROGRAMMINGFAILURE";
-      case 0x73:
-        return "ECUERROR_WRONGBLOCKSEQCOUNTER";
-      case 0x7E:
-        return "ECUERROR_SUBFNNOTSUPPORTEDINACTIVESESSION";
-      case 0x7F:
-        return "ECUERROR_SERVICENOTSUPPORTEDINACTIVESESSION";
-      case 0x81:
-        return "ECUERROR_RPMTOOHIGH";
-      case 0x82:
-        return "ECUERROR_RPMTOOLOW";
-      case 0x83:
-        return "ECUERROR_ENGINEISRUNNING";
-      case 0x84:
-        return "ECUERROR_ENGINEISNOTRUNNING";
-      case 0x85:
-        return "ECUERROR_ENGINERUNTIMETOOLOW";
-      case 0x86:
-        return "ECUERROR_TEMPTOOHIGH";
-      case 0x87:
-        return "ECUERROR_TEMPTOOLOW";
-      case 0x88:
-        return "ECUERROR_VEHSPEEDTOOHIGH";
-      case 0x89:
-        return "ECUERROR_VEHSPEEDTOOLOW";
-      case 0x8A:
-        return "ECUERROR_THROTTLETOOHIGH";
-      case 0x8B:
-        return "ECUERROR_THROTTLETOOLOW";
-      case 0x8C:
-        return "ECUERROR_TRANSMISSIONRANGENOTINNEUTRAL";
-      case 0x8D:
-        return "ECUERROR_TRANSMISSIONRANGENOTINGEAR";
-      case 0x8F:
-        return "ECUERROR_BRKPEDALNOTPRESSED";
-      case 0x90:
-        return "ECUERROR_SHIFTERLEVERNOTINPARK";
-      case 0x91:
-        return "ECUERROR_TRQCONVERTERCLUTCHLOCKED";
-      case 0x92:
-        return "ECUERROR_VOLTAGETOOHIGH";
-      case 0x93:
-        return "ECUERROR_VOLTAGETOOLOW";
-      default:
-        return "ECUERROR_UNKNOWN_NRC_${nrc.toRadixString(16)}";
-    }
   }
 }
