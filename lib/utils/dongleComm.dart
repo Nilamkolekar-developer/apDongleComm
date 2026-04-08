@@ -9,8 +9,6 @@ import 'package:ap_dongle_comm/utils/helper/responseArrayDecoding.dart';
 import 'package:ap_dongle_comm/utils/model/responseArrayStatusModel.dart';
 import 'package:ap_dongle_comm/utils/model/sessionLogModel.dart';
 import 'package:convert/convert.dart';
-import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 
 class DongleComm {
   CommController? comm;
@@ -45,23 +43,8 @@ class DongleComm {
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join(' ');
       print("Security Access Response (hex): $hexResponse");
-
-      Fluttertoast.showToast(
-        msg: "Security Access Response: $hexResponse",
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: Colors.black87,
-        textColor: Colors.white,
-      );
     } else {
       print("Security Access Response is null");
-      Fluttertoast.showToast(
-        msg: "Security Access Response is null",
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: Colors.black87,
-        textColor: Colors.white,
-      );
     }
 
     return response;
@@ -551,6 +534,7 @@ class DongleComm {
                 ecuResponse: ecuResponseBytes,
                 ecuResponseStatus: "DONGLEERROR_SENDAGAINTHRESHOLDCROSSED",
                 actualDataBytes: actualDataBytes,
+                sentBytes: sendBytes,
               );
               return responseStructure;
             }
@@ -566,7 +550,7 @@ class DongleComm {
 
               if (responseReadAgain == null) {
                 readRetry++;
-                await Future.delayed(const Duration(milliseconds: 50));
+                await Future.delayed(const Duration(milliseconds: 10));
                 continue;
               }
 
@@ -623,6 +607,13 @@ class DongleComm {
             ecuResponse: ecuResponseBytes,
             ecuResponseStatus: dataStatus,
             actualDataBytes: actualDataBytes,
+          );
+          logs.add(
+            SessionLogsModel(
+              header: "Rx",
+              message: byteArrayToHex(actualDataBytes), // 👈 ACTUAL ECU DATA
+              status: dataStatus,
+            ),
           );
 
           print("------ECU RESPONSE SUMMARY------");
@@ -839,15 +830,15 @@ class DongleComm {
     }
   }
 
-  Protocol currentProtocol = Protocol.ISO15765_250KB_11BIT_CAN;
-
+  Protocol? protocol;
   Future<dynamic> canSetTxHeader(String txHeader) async {
     print("------CAN_SetTxHeader------");
 
     String command = "";
     List<int> crcInput = [];
 
-    bool is11Bit = [
+    // 1. Classify Protocol
+    final bool is11Bit = [
       Protocol.ISO15765_250KB_11BIT_CAN,
       Protocol.ISO15765_500KB_11BIT_CAN,
       Protocol.ISO15765_1MB_11BIT_CAN,
@@ -861,9 +852,9 @@ class DongleComm {
       Protocol.CANOPEN_500KBPS_11BIT_CAN,
       Protocol.XMODEM_125KBPS_11BIT_CAN,
       Protocol.XMODEM_500KBPS_11BIT_CAN,
-    ].contains(currentProtocol);
+    ].contains(protocol);
 
-    bool is29Bit = [
+    final bool is29Bit = [
       Protocol.ISO15765_250Kb_29BIT_CAN,
       Protocol.ISO15765_500KB_29BIT_CAN,
       Protocol.ISO15765_1MB_29BIT_CAN,
@@ -875,61 +866,58 @@ class DongleComm {
       Protocol.OE_IVN_1MBPS_29BIT_CAN,
       Protocol.XMODEM_500KBPS_29BIT_CAN,
       Protocol.XMODEM_125KBPS_29BIT_CAN,
-    ].contains(currentProtocol);
+    ].contains(protocol);
 
-    bool isKWP = [
+    final bool isKWP = [
       Protocol.ISO14230_4KWP_FASTINIT_80,
       Protocol.ISO14230_4KWP_FASTINIT_C0,
-    ].contains(currentProtocol);
+    ].contains(protocol);
 
-    // 2. Build Command and Select CRC Range
+    // 2. Build command and select CRC byte range
     if (is11Bit) {
       if (isChannel) {
-        command =
-            "2003$channelId"
-            "04$txHeader";
-        var bytes = hex.decode(command);
+        command = "2003${channelId}04$txHeader";
+        final bytes = hex.decode(command);
         crcInput = bytes.sublist(3, 6); // bytes[3], [4], [5]
       } else {
         command = "200504$txHeader";
-        var bytes = hex.decode(command);
+        final bytes = hex.decode(command);
         crcInput = bytes.sublist(2, 5); // bytes[2], [3], [4]
       }
     } else if (is29Bit) {
       if (isChannel) {
-        command =
-            "2005$channelId"
-            "04$txHeader";
-        var bytes = hex.decode(command);
-        crcInput = bytes.sublist(3, 8); // bytes[3] through [7]
+        command = "2005${channelId}04$txHeader";
+        final bytes = hex.decode(command);
+        crcInput = bytes.sublist(3, 8); // bytes[3..7]
       } else {
         command = "200704$txHeader";
-        var bytes = hex.decode(command);
-        crcInput = bytes.sublist(2, 7); // bytes[2] through [6]
+        final bytes = hex.decode(command);
+        crcInput = bytes.sublist(2, 7); // bytes[2..6]
       }
     } else if (isKWP) {
       if (isChannel) {
-        command =
-            "2002$channelId"
-            "04$txHeader";
-        var bytes = hex.decode(command);
+        command = "2002${channelId}04$txHeader";
+        final bytes = hex.decode(command);
         crcInput = bytes.sublist(3, 5); // bytes[3], [4]
       } else {
         command = "200404$txHeader";
-        var bytes = hex.decode(command);
+        final bytes = hex.decode(command);
         crcInput = bytes.sublist(2, 4); // bytes[2], [3]
       }
+    } else {
+      throw UnsupportedError("Unsupported protocol: $protocol");
     }
 
-    List<int> crcValue = Crc16CcittKermit.computeChecksumBytes(crcInput);
+    // 3. Compute CRC and encode as hex string
+    final List<int> crcBytes = Crc16CcittKermit.computeChecksumBytes(crcInput);
+    final String crcHex = crcBytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
 
-    // Maps each byte to a 2-character hex string and joins them together
-    String crcHex = crcValue
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join('')
-        .toUpperCase();
-    // 4. Send
-    Uint8List sendBytes = Uint8List.fromList(hex.decode(command + crcHex));
+    // 4. Build final byte array and send
+    final Uint8List sendBytes = Uint8List.fromList(
+      hex.decode(command + crcHex),
+    );
     return await comm!.sendCommand(sendBytes);
   }
 
@@ -986,7 +974,7 @@ class DongleComm {
       Protocol.CANOPEN_500KBPS_11BIT_CAN,
       Protocol.XMODEM_125KBPS_11BIT_CAN,
       Protocol.XMODEM_500KBPS_11BIT_CAN,
-    ].contains(currentProtocol);
+    ].contains(protocol);
 
     bool is29Bit = [
       Protocol.ISO15765_250Kb_29BIT_CAN,
@@ -1000,12 +988,12 @@ class DongleComm {
       Protocol.OE_IVN_1MBPS_29BIT_CAN,
       Protocol.XMODEM_500KBPS_29BIT_CAN,
       Protocol.XMODEM_125KBPS_29BIT_CAN,
-    ].contains(currentProtocol);
+    ].contains(protocol);
 
     bool isKWP = [
       Protocol.ISO14230_4KWP_FASTINIT_80,
       Protocol.ISO14230_4KWP_FASTINIT_C0,
-    ].contains(currentProtocol);
+    ].contains(protocol);
     if (is11Bit) {
       if (isChannel) {
         command =
@@ -1598,6 +1586,7 @@ class DongleComm {
     bool retStatus = false;
     try {
       print("\n====== rp1210ClientConnect START ======");
+      // 🍞 Toast 1: Starting the process
 
       // 1️⃣ Prepare Protocol String & Message
       String protocolStr = getRP1210ProtocolString(protocol);
@@ -1612,33 +1601,36 @@ class DongleComm {
         message,
       );
 
-      print("[SENDING HEX] ${bytesToHex(command)}");
+      // 🍞 Toast 2: Show the Hex being sent
+      String hexSent = bytesToHex(command);
+      print("[SENDING HEX] $hexSent");
 
       // 3️⃣ Send and Wait for Response
       Uint8List? resp = await comm!.sendCommand(command);
 
       if (resp != null && resp.isNotEmpty) {
-        print("[RECEIVED HEX] ${bytesToHex(resp)}");
+        String hexReceived = bytesToHex(resp);
+        print("[RECEIVED HEX] $hexReceived");
+
+        // 🍞 Toast 3: Show the raw response
 
         // 4️⃣ Updated Logic Check
-        // We check if the FIRST 4 bytes are zero (Standard RP1210 Status length)
-        // or if the specific error byte is 0x82
-
         bool allZeros = resp.every((x) => x == 0);
-
-        // ✅ FIX: Use a safer index check for 0x82
-        // Some RP1210 responses are exactly 4 bytes (indices 0, 1, 2, 3)
         bool isHardwareNotResponding = (resp.length >= 4 && resp[3] == 0x82);
 
         if (allZeros || isHardwareNotResponding) {
           print("✅ ClientConnect SUCCESS (Status: ${allZeros ? '0' : '0x82'})");
+
           retStatus = true;
         } else {
-          // If it failed, print the actual bytes to see what the error code is
-          print("❌ ClientConnect FAILED: Received ${bytesToHex(resp)}");
+          print("❌ ClientConnect FAILED: Received $hexReceived");
+
+          // 🍞 Toast 5: Protocol Level Failure
         }
       } else {
         print("❌ ClientConnect FAILED: No response from SendCommand");
+
+        // 🍞 Toast 6: No Response/Timeout
       }
     } catch (e) {
       print("🔥 Exception in rp1210ClientConnect: $e");
@@ -1691,31 +1683,26 @@ class DongleComm {
     SubCommandId subCommandId,
   ) async {
     bool retStatus = false;
+
     try {
       Uint8List message;
 
       print("🚀 RP1210SendCommand called for: $subCommandId");
+
       print("TX Array: ${txArray.toList()}");
       print("RX Array: ${rxArray.toList()}");
 
       if (subCommandId == SubCommandId.setFlowControl) {
         message = Uint8List(17);
 
-        // SubCommand ID (Bytes 0-1)
         message[0] = (subCommandId.value >> 8) & 0xFF;
         message[1] = subCommandId.value & 0xFF;
 
-        // Extended Address Flag (Byte 2)
         message[2] = (txArray[0] == 0x00) ? 0 : 1;
 
-        // RX Array (Bytes 3-6) -> Matches C# Array.Copy(rxArray, 0, message, 3, 4)
         message.setRange(3, 7, rxArray);
-
-        // TX Array (Bytes 8-11) -> Matches C# Array.Copy(txArray, 0, message, 8, 4)
-        // Note: Index 7 remains 0x00, which provides the padding seen in .NET
         message.setRange(8, 12, txArray);
 
-        // Flow Control Flags (Bytes 15-16)
         message[15] = 0xFF;
         message[16] = 0xFF;
 
@@ -1723,23 +1710,17 @@ class DongleComm {
       } else {
         message = Uint8List(13);
 
-        // SubCommand ID (Bytes 0-1)
         message[0] = (subCommandId.value >> 8) & 0xFF;
         message[1] = subCommandId.value & 0xFF;
 
-        // Extended Address Flag (Byte 2)
         message[2] = (txArray[0] == 0x00) ? 0 : 1;
 
-        // Padding (Bytes 3-7)
         message.setRange(3, 8, List.filled(5, 0xFF));
-
-        // RX Array (Bytes 8-11)
         message.setRange(8, 12, rxArray);
 
         print("MsgFilter message: ${message.toList()}");
       }
 
-      // Build full command using your existing helper
       Uint8List command = getRP1210Command(
         DWCommandId.sendCommand.value,
         message,
@@ -1747,19 +1728,17 @@ class DongleComm {
 
       print("Full command to send: ${command.toList()}");
 
-      // Send command via your WiFi/Socket communication layer
       Uint8List? resp = await comm?.sendCommand(command);
 
       if (resp != null) {
         print("Response received: ${resp.toList()}");
 
-        // In RP1210, a successful SendCommand usually returns a 4-byte 0 payload
-        // or a response where the status byte is 0.
         if (resp.every((x) => x == 0)) {
           retStatus = true;
+
           print("✅ Command executed successfully");
         } else {
-          print("⚠️ Command execution failed or response non-zero");
+          print("⚠️ Command execution failed");
         }
       } else {
         print("Response received: null");
@@ -1767,87 +1746,9 @@ class DongleComm {
     } catch (ex) {
       print("💥 Exception in rp1210SendCommand: $ex");
     }
+
     return retStatus;
   }
-  // Future<bool> rp1210SendCommand(
-  //   Uint8List txArr,
-  //   Uint8List rxArr,
-  //   SubCommandId subCommandId,
-  // ) async {
-  //   try {
-  //     Uint8List message;
-
-  //     print("🚀 rp1210SendCommand called for: $subCommandId");
-  //     print(
-  //       "TX Array: ${txArr.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //     );
-  //     print(
-  //       "RX Array: ${rxArr.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //     );
-
-  //     if (subCommandId == SubCommandId.setFlowControl) {
-  //       message = Uint8List(17);
-
-  //       message[0] = (subCommandId.value >> 8) & 0xFF;
-  //       message[1] = subCommandId.value & 0xFF;
-  //       message[2] = (txArr[0] == 0x00) ? 0 : 1;
-
-  //       message.setRange(3, 7, rxArr);
-  //       message.setRange(8, 12, txArr);
-
-  //       message[15] = 0xFF;
-  //       message[16] = 0xFF;
-
-  //       print(
-  //         "FlowControl message: ${message.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //       );
-  //     } else {
-  //       message = Uint8List(13);
-
-  //       message[0] = (SubCommandId.setMsgFilter.value >> 8) & 0xFF;
-  //       message[1] = SubCommandId.setMsgFilter.value & 0xFF;
-  //       message[2] = (txArr[0] == 0x00) ? 0 : 1;
-
-  //       message[3] = 0xFF;
-  //       message[4] = 0xFF;
-  //       message[5] = 0xFF;
-  //       message[6] = 0xFF;
-  //       message[7] = 0xFF;
-
-  //       message.setRange(8, 12, rxArr);
-
-  //       print(
-  //         "MsgFilter message: ${message.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //       );
-  //     }
-
-  //     Uint8List command = getRP1210Command(
-  //       DWCommandId.sendCommand.value,
-  //       message,
-  //     );
-  //     print(
-  //       "Full command to send: ${command.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //     );
-
-  //     Uint8List? resp = await comm!.sendCommand(command);
-  //     print(
-  //       "Response received: ${resp?.map((e) => e.toRadixString(16).padLeft(2, '0')).toList()}",
-  //     );
-
-  //     if (resp != null && _extractStatus(resp) == 0) {
-  //       txArray = txArr;
-  //       rxArray = rxArr;
-  //       print("✅ Command executed successfully");
-  //       return true;
-  //     } else {
-  //       print("⚠ Command failed with status: ${_extractStatus(resp!)}");
-  //     }
-  //   } catch (e) {
-  //     print("💥 Exception in rp1210SendCommand: $e");
-  //   }
-
-  //   return false;
-  // }
 
   String getRP1210ProtocolString(String protocol) {
     if (comm!.connectivity == Connectivity.rp1210Usb ||
@@ -1904,7 +1805,7 @@ class DongleComm {
       print('[DEBUG] Payload length: ${payload.length}');
       print('[DEBUG] Payload: ${bytesToHex(payload)}');
 
-      if (txArray == null || txArray.length < 4) {
+      if (txArray.length < 4) {
         print('[ERROR] txArray invalid');
         return null;
       }
